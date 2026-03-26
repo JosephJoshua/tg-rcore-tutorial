@@ -1,5 +1,5 @@
 [package]
-name = "tg-rcore-tutorial-ch4"
+name = "jsph-tg-rcore-tutorial-ch4-t1l2"
 description = "Chapter 4 of rCore Tutorial: Address space management with SV39 virtual memory."
 version = "0.4.8"
 edition = "2024"

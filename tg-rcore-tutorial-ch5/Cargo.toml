@@ -1,5 +1,5 @@
 [package]
-name = "tg-rcore-tutorial-ch5"
+name = "jsph-tg-rcore-tutorial-ch5-t1l3"
 description = "Chapter 5 of rCore Tutorial: Process management with fork, exec and wait syscalls."
 version = "0.4.8"
 edition = "2024"

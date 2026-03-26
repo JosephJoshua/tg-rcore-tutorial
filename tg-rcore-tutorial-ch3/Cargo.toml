@@ -1,5 +1,5 @@
 [package]
-name = "tg-rcore-tutorial-ch3"
+name = "jsph-tg-rcore-tutorial-ch3-t1l1"
 description = "Chapter 3 of rCore Tutorial: Multiprogramming and time-sharing multitasking."
 version = "0.4.8"
 edition = "2024"

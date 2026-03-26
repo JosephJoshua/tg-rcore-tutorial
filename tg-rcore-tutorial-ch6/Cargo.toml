@@ -1,5 +1,5 @@
 [package]
-name = "tg-rcore-tutorial-ch6"
+name = "jsph-tg-rcore-tutorial-ch6-t1l4"
 description = "Chapter 6 of rCore Tutorial: File system with easy-fs and virtio block device."
 version = "0.4.8"
 edition = "2024"
@@ -39,10 +39,10 @@ tg-kernel-alloc = { package = "tg-rcore-tutorial-kernel-alloc", path = "../tg-rc
 tg-kernel-vm = { package = "tg-rcore-tutorial-kernel-vm", path = "../tg-rcore-tutorial-kernel-vm", version = "0.4.8" }
 tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
 tg-task-manage = { package = "tg-rcore-tutorial-task-manage", path = "../tg-rcore-tutorial-task-manage", version = "0.4.8", features = ["proc"] }
-tg-easy-fs = { package = "tg-rcore-tutorial-easy-fs", path = "./tg-rcore-tutorial-easy-fs", version = "0.4.8" }
+tg-easy-fs = { package = "jsph-tg-rcore-tutorial-easy-fs-t1l4", path = "./tg-rcore-tutorial-easy-fs", version = "0.4.8" }
 
 [build-dependencies]
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
-tg-easy-fs = { package = "tg-rcore-tutorial-easy-fs", path = "./tg-rcore-tutorial-easy-fs", version = "0.4.8" }
+tg-easy-fs = { package = "jsph-tg-rcore-tutorial-easy-fs-t1l4", path = "./tg-rcore-tutorial-easy-fs", version = "0.4.8" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
