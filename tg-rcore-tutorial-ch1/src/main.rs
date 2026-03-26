@@ -24,9 +24,16 @@
 // 非 RISC-V64 架构允许死代码（用于 cargo publish --dry-run 在主机上通过编译）
 #![cfg_attr(not(target_arch = "riscv64"), allow(dead_code))]
 
+#[cfg(target_arch = "riscv64")]
+extern crate alloc;
+
 // 引入 SBI 调用库，提供 console_putchar（输出字符）和 shutdown（关机）功能
 // 启用 nobios 特性后，tg_sbi 内建了 M-mode 启动代码，无需外部 SBI 固件
 use tg_sbi::{console_putchar, shutdown};
+
+#[cfg(target_arch = "riscv64")]
+#[allow(dead_code)]
+mod allocator;
 
 /// S 态程序入口点。
 ///
@@ -43,7 +50,7 @@ use tg_sbi::{console_putchar, shutdown};
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
     // 栈大小：4 KiB
-    const STACK_SIZE: usize = 4096;
+    const STACK_SIZE: usize = 64 * 1024;
 
     // 在 .bss.uninit 段中分配栈空间
     #[unsafe(link_section = ".bss.uninit")]
