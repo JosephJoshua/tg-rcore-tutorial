@@ -41,6 +41,9 @@ use riscv::register::*;
 use task::TaskControlBlock;
 // 日志模块
 use tg_console::log;
+
+/// 每个任务的系统调用计数（静态分配，避免占用栈空间）
+pub static mut SYSCALL_COUNTS: [[u32; 500]; APP_CAPACITY] = [[0; 500]; APP_CAPACITY];
 // SBI 调用：set_timer、console_putchar、shutdown 等
 use tg_sbi;
 
@@ -149,7 +152,7 @@ extern "C" fn rust_main() -> ! {
                     // ─── 系统调用：用户程序执行了 ecall 指令 ───
                     Trap::Exception(Exception::UserEnvCall) => {
                         use task::SchedulingEvent as Event;
-                        match tcb.handle_syscall() {
+                        match tcb.handle_syscall(i) {
                             // 普通系统调用（如 write）：处理完成后继续运行当前任务
                             Event::None => continue,
                             // exit 系统调用：任务主动退出
@@ -294,24 +297,38 @@ mod impls {
         }
     }
 
-    /// Trace 系统调用实现（练习题需要完成的部分）
+    /// Trace 系统调用实现
     ///
-    /// 当前为占位实现，返回 -1 表示未实现。
-    /// 学生需要在练习中实现 trace 功能，支持：
-    /// - 读取用户内存（trace_request=0）
-    /// - 写入用户内存（trace_request=1）
-    /// - 查询系统调用计数（trace_request=2）
+    /// - trace_request=0: 读取用户内存 id 地址处一个字节
+    /// - trace_request=1: 写入 data 的最低字节到用户内存 id 地址处
+    /// - trace_request=2: 查询系统调用 id 的调用次数（本次调用也计入）
     impl Trace for SyscallContext {
-        #[inline]
         fn trace(
             &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
+            caller: Caller,
+            trace_request: usize,
+            id: usize,
+            data: usize,
         ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+            match trace_request {
+                0 => {
+                    let ptr = id as *const u8;
+                    unsafe { *ptr as isize }
+                }
+                1 => {
+                    let ptr = id as *mut u8;
+                    unsafe { *ptr = data as u8; }
+                    0
+                }
+                2 => {
+                    if id < 500 {
+                        unsafe { super::SYSCALL_COUNTS[caller.entity][id] as isize }
+                    } else {
+                        0
+                    }
+                }
+                _ => -1,
+            }
         }
     }
 }

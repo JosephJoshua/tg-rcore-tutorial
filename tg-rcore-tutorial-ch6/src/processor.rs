@@ -74,13 +74,33 @@ impl Manage<Process, ProcId> for ProcManager {
     }
 }
 
+/// 步幅调度大步幅常量
+const BIG_STRIDE: usize = 1_000_000;
+
 impl Schedule<ProcId> for ProcManager {
     /// 加入就绪队列尾部
     fn add(&mut self, id: ProcId) {
         self.ready_queue.push_back(id);
     }
-    /// 从就绪队列头部取出
+    /// 步幅调度：取出 stride 最小的任务
     fn fetch(&mut self) -> Option<ProcId> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.is_empty() {
+            return None;
+        }
+        let mut min_idx = 0;
+        let mut min_stride = usize::MAX;
+        for (idx, id) in self.ready_queue.iter().enumerate() {
+            if let Some(proc) = self.tasks.get(id) {
+                if proc.stride < min_stride {
+                    min_stride = proc.stride;
+                    min_idx = idx;
+                }
+            }
+        }
+        let id = self.ready_queue.remove(min_idx).unwrap();
+        if let Some(proc) = self.tasks.get_mut(&id) {
+            proc.stride += BIG_STRIDE / proc.priority;
+        }
+        Some(id)
     }
 }

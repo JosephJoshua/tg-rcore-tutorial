@@ -100,15 +100,34 @@ impl Manage<Process, ProcId> for ProcManager {
     }
 }
 
-/// 实现 Schedule trait：进程调度（当前为 FIFO/RR）
+const BIG_STRIDE: usize = 1_000_000;
+
+/// 实现 Schedule trait：进程调度（stride 调度算法）
 impl Schedule<ProcId> for ProcManager {
     /// 将进程加入就绪队列尾部
     fn add(&mut self, id: ProcId) {
         self.ready_queue.push_back(id);
     }
 
-    /// 从就绪队列头部取出下一个要执行的进程
+    /// 从就绪队列中取出 stride 最小的进程
     fn fetch(&mut self) -> Option<ProcId> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.is_empty() {
+            return None;
+        }
+        let mut min_idx = 0;
+        let mut min_stride = usize::MAX;
+        for (idx, pid) in self.ready_queue.iter().enumerate() {
+            if let Some(proc) = self.tasks.get(pid) {
+                if proc.stride < min_stride {
+                    min_stride = proc.stride;
+                    min_idx = idx;
+                }
+            }
+        }
+        let pid = self.ready_queue.remove(min_idx).unwrap();
+        if let Some(proc) = self.tasks.get_mut(&pid) {
+            proc.stride += BIG_STRIDE / proc.priority;
+        }
+        Some(pid)
     }
 }

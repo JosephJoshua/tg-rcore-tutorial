@@ -365,7 +365,8 @@ fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
 /// 包括 IO、Process、Scheduling、Clock、Memory 等系统调用接口。
 mod impls {
     use crate::{
-        build_flags, process::Process as ProcStruct, processor::ProcManager, Sv39, APPS, PROCESSOR,
+        build_flags, parse_flags, process::Process as ProcStruct, processor::ProcManager, Sv39,
+        APPS, PROCESSOR,
     };
     use alloc::alloc::alloc_zeroed;
     use core::{alloc::Layout, ptr::NonNull};
@@ -644,13 +645,32 @@ mod impls {
         /// 无需复制父进程地址空间。
         ///
         /// TODO: 实现 spawn 系统调用（练习题）
-        fn spawn(&self, _caller: Caller, _path: usize, _count: usize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "spawn: parent pid = {}, not implemented",
-                current.pid.get_usize()
-            );
-            -1
+        fn spawn(&self, _caller: Caller, path: usize, count: usize) -> isize {
+            let processor: *mut PManager<ProcStruct, ProcManager> =
+                PROCESSOR.get_mut() as *mut _;
+            let current = unsafe { (*processor).current().unwrap() };
+            let parent_pid = current.pid;
+            const READABLE: VmFlags<Sv39> = build_flags("RV");
+            let child = current
+                .address_space
+                .translate::<u8>(VAddr::new(path), READABLE)
+                .map(|ptr| unsafe {
+                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                        ptr.as_ptr(),
+                        count,
+                    ))
+                })
+                .and_then(|name| APPS.get(name))
+                .and_then(|input| ElfFile::new(input).ok())
+                .and_then(|elf| ProcStruct::from_elf(elf));
+            match child {
+                Some(child_proc) => {
+                    let pid = child_proc.pid;
+                    unsafe { (*processor).add(pid, child_proc, parent_pid) };
+                    pid.get_usize() as isize
+                }
+                None => -1,
+            }
         }
 
         /// sbrk 系统调用：调整进程堆空间大小
@@ -680,13 +700,12 @@ mod impls {
         ///
         /// TODO: 实现 set_priority 系统调用（练习题：stride 调度算法）
         fn set_priority(&self, _caller: Caller, prio: isize) -> isize {
+            if prio < 2 {
+                return -1;
+            }
             let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "set_priority: pid = {}, prio = {}, not implemented",
-                current.pid.get_usize(),
-                prio
-            );
-            -1
+            current.priority = prio as usize;
+            prio
         }
     }
 
@@ -727,8 +746,6 @@ mod impls {
     /// 内存管理系统调用实现
     impl Memory for SyscallContext {
         /// mmap 系统调用：映射匿名内存
-        ///
-        /// TODO: 实现 mmap 系统调用（练习题）
         fn mmap(
             &self,
             _caller: Caller,
@@ -739,18 +756,70 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+            if addr % PAGE_SIZE != 0 {
+                return -1;
+            }
+            if prot & !0x7 != 0 {
+                return -1;
+            }
+            if prot & 0x7 == 0 {
+                return -1;
+            }
+            let current = PROCESSOR.get_mut().current().unwrap();
+            if len == 0 {
+                return 0;
+            }
+            let len_aligned = len.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            let start_vpn = VPN::<Sv39>::new(addr >> Sv39::PAGE_BITS);
+            let end_vpn = VPN::<Sv39>::new((addr + len_aligned) >> Sv39::PAGE_BITS);
+            const CHECK: VmFlags<Sv39> = build_flags("__V");
+            for vpn_val in start_vpn.val()..end_vpn.val() {
+                let va = VAddr::<Sv39>::new(vpn_val << Sv39::PAGE_BITS);
+                if current.address_space.translate::<u8>(va, CHECK).is_some() {
+                    return -1;
+                }
+            }
+            let mut flags_str: [u8; 5] = *b"U___V";
+            if prot & 0x4 != 0 {
+                flags_str[1] = b'X';
+            }
+            if prot & 0x2 != 0 {
+                flags_str[2] = b'W';
+            }
+            if prot & 0x1 != 0 {
+                flags_str[3] = b'R';
+            }
+            let flags =
+                parse_flags(unsafe { core::str::from_utf8_unchecked(&flags_str) }).unwrap();
+            current
+                .address_space
+                .map(start_vpn..end_vpn, &[], 0, flags);
+            0
         }
 
         /// munmap 系统调用：取消内存映射
-        ///
-        /// TODO: 实现 munmap 系统调用（练习题）
         fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+            const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+            if addr % PAGE_SIZE != 0 {
+                return -1;
+            }
+            let current = PROCESSOR.get_mut().current().unwrap();
+            if len == 0 {
+                return 0;
+            }
+            let len_aligned = len.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            let start_vpn = VPN::<Sv39>::new(addr >> Sv39::PAGE_BITS);
+            let end_vpn = VPN::<Sv39>::new((addr + len_aligned) >> Sv39::PAGE_BITS);
+            const CHECK: VmFlags<Sv39> = build_flags("__V");
+            for vpn_val in start_vpn.val()..end_vpn.val() {
+                let va = VAddr::<Sv39>::new(vpn_val << Sv39::PAGE_BITS);
+                if current.address_space.translate::<u8>(va, CHECK).is_none() {
+                    return -1;
+                }
+            }
+            current.address_space.unmap(start_vpn..end_vpn);
+            0
         }
     }
 }

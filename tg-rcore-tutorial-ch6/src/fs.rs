@@ -39,7 +39,7 @@ pub static FS: Lazy<FileSystem> = Lazy::new(|| FileSystem {
 /// 当前仅支持**单级目录**（所有文件在根目录下）。
 pub struct FileSystem {
     /// 根目录 inode
-    root: Inode,
+    pub root: Inode,
 }
 
 impl FSManager for FileSystem {
@@ -82,14 +82,14 @@ impl FSManager for FileSystem {
         Some(self.root.readdir())
     }
 
-    /// 创建硬链接（TODO 练习题）
-    fn link(&self, _src: &str, _dst: &str) -> isize {
-        unimplemented!()
+    /// 创建硬链接
+    fn link(&self, src: &str, dst: &str) -> isize {
+        self.root.link(src, dst)
     }
 
-    /// 删除硬链接（TODO 练习题）
-    fn unlink(&self, _path: &str) -> isize {
-        unimplemented!()
+    /// 删除硬链接
+    fn unlink(&self, path: &str) -> isize {
+        self.root.unlink(path)
     }
 }
 

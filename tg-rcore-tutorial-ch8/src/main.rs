@@ -729,16 +729,41 @@ mod impls {
                 current_proc.semaphore_list.push(Some(Arc::new(Semaphore::new(res_count))));
                 current_proc.semaphore_list.len() - 1
             };
+            // Track available count and allocation map
+            while current_proc.sem_available.len() <= id {
+                current_proc.sem_available.push(0);
+            }
+            current_proc.sem_available[id] = res_count as isize;
+            while current_proc.sem_alloc.len() <= id {
+                current_proc.sem_alloc.push(alloc::collections::BTreeMap::new());
+            }
             id as isize
         }
 
         /// V 操作：释放信号量，唤醒等待线程
         fn semaphore_up(&self, _caller: Caller, sem_id: usize) -> isize {
             let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
+            let current = unsafe { (*processor).current().unwrap() };
+            let tid = current.tid.get_usize();
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
-            if let Some(tid) = sem.up() {
-                unsafe { (*processor).re_enque(tid); }
+            // Update tracking: decrement current thread's allocation
+            if sem_id < current_proc.sem_alloc.len() {
+                let entry = current_proc.sem_alloc[sem_id].entry(tid).or_insert(0);
+                if *entry > 0 { *entry -= 1; }
+            }
+            if let Some(woken_tid) = sem.up() {
+                // The woken thread acquires the semaphore
+                current_proc.sem_wait.remove(&woken_tid.get_usize());
+                if sem_id < current_proc.sem_alloc.len() {
+                    *current_proc.sem_alloc[sem_id].entry(woken_tid.get_usize()).or_insert(0) += 1;
+                }
+                unsafe { (*processor).re_enque(woken_tid); }
+            } else {
+                // No one was waiting, so available increases
+                if sem_id < current_proc.sem_available.len() {
+                    current_proc.sem_available[sem_id] += 1;
+                }
             }
             0
         }
@@ -749,8 +774,29 @@ mod impls {
             let current = unsafe { (*processor).current().unwrap() };
             let tid = current.tid;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
+
+            if current_proc.deadlock_detect_enabled {
+                if !check_sem_safety(current_proc, tid.get_usize(), sem_id) {
+                    return -0xDEAD_isize;
+                }
+            }
+
             let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
-            if !sem.down(tid) { -1 } else { 0 }
+            let result = sem.down(tid);
+            if result {
+                // Successfully acquired: update allocation and available
+                if sem_id < current_proc.sem_alloc.len() {
+                    *current_proc.sem_alloc[sem_id].entry(tid.get_usize()).or_insert(0) += 1;
+                }
+                if sem_id < current_proc.sem_available.len() {
+                    current_proc.sem_available[sem_id] -= 1;
+                }
+                0
+            } else {
+                // Blocked: record wait
+                current_proc.sem_wait.insert(tid.get_usize(), sem_id);
+                -1
+            }
         }
 
         /// 创建互斥锁（blocking=true 为阻塞锁）
@@ -759,15 +805,19 @@ mod impls {
                 Some(Arc::new(MutexBlocking::new()))
             } else { None };
             let current_proc = PROCESSOR.get_mut().get_current_proc().unwrap();
-            if let Some(id) = current_proc.mutex_list.iter().enumerate()
+            let id = if let Some(id) = current_proc.mutex_list.iter().enumerate()
                 .find(|(_, item)| item.is_none()).map(|(id, _)| id)
             {
                 current_proc.mutex_list[id] = new_mutex;
-                id as isize
+                id
             } else {
                 current_proc.mutex_list.push(new_mutex);
-                current_proc.mutex_list.len() as isize - 1
+                current_proc.mutex_list.len() - 1
+            };
+            while current_proc.mutex_holder.len() <= id {
+                current_proc.mutex_holder.push(None);
             }
+            id as isize
         }
 
         /// 解锁，唤醒等待线程
@@ -775,8 +825,17 @@ mod impls {
             let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
-            if let Some(tid) = mutex.unlock() {
-                unsafe { (*processor).re_enque(tid); }
+            // Clear holder tracking
+            if mutex_id < current_proc.mutex_holder.len() {
+                current_proc.mutex_holder[mutex_id] = None;
+            }
+            if let Some(woken_tid) = mutex.unlock() {
+                // The woken thread now holds the mutex
+                current_proc.mutex_wait.remove(&woken_tid.get_usize());
+                if mutex_id < current_proc.mutex_holder.len() {
+                    current_proc.mutex_holder[mutex_id] = Some(woken_tid.get_usize());
+                }
+                unsafe { (*processor).re_enque(woken_tid); }
             }
             0
         }
@@ -787,8 +846,26 @@ mod impls {
             let current = unsafe { (*processor).current().unwrap() };
             let tid = current.tid;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
+
+            if current_proc.deadlock_detect_enabled {
+                if !check_mutex_safety(current_proc, tid.get_usize(), mutex_id) {
+                    return -0xDEAD_isize;
+                }
+            }
+
             let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
-            if !mutex.lock(tid) { -1 } else { 0 }
+            let result = mutex.lock(tid);
+            if result {
+                // Successfully acquired: update holder tracking
+                if mutex_id < current_proc.mutex_holder.len() {
+                    current_proc.mutex_holder[mutex_id] = Some(tid.get_usize());
+                }
+                0
+            } else {
+                // Blocked: record wait
+                current_proc.mutex_wait.insert(tid.get_usize(), mutex_id);
+                -1
+            }
         }
 
         /// 创建条件变量
@@ -825,18 +902,153 @@ mod impls {
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let condvar = Arc::clone(current_proc.condvar_list[condvar_id].as_ref().unwrap());
             let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
+            // condvar_wait releases the mutex, so update tracking
+            if mutex_id < current_proc.mutex_holder.len() {
+                current_proc.mutex_holder[mutex_id] = None;
+            }
             let (flag, waking_tid) = condvar.wait_with_mutex(tid, mutex);
             if let Some(waking_tid) = waking_tid {
+                // This thread was woken from the mutex wait queue and now holds the mutex
+                current_proc.mutex_wait.remove(&waking_tid.get_usize());
+                if mutex_id < current_proc.mutex_holder.len() {
+                    current_proc.mutex_holder[mutex_id] = Some(waking_tid.get_usize());
+                }
                 unsafe { (*processor).re_enque(waking_tid); }
             }
             if !flag { -1 } else { 0 }
         }
 
-        /// 死锁检测（TODO 练习题）
+        /// 死锁检测
         fn enable_deadlock_detect(&self, _caller: Caller, is_enable: i32) -> isize {
-            tg_console::log::info!("enable_deadlock_detect: is_enable = {is_enable}, not implemented");
-            -1
+            match is_enable {
+                0 | 1 => {
+                    let current_proc = PROCESSOR.get_mut().get_current_proc().unwrap();
+                    current_proc.deadlock_detect_enabled = is_enable == 1;
+                    0
+                }
+                _ => -1,
+            }
         }
+    }
+
+    /// Mutex deadlock detection via wait-for graph cycle detection.
+    /// Returns true if safe (no deadlock), false if deadlock detected.
+    fn check_mutex_safety(proc: &crate::process::Process, requesting_tid: usize, requesting_mutex_id: usize) -> bool {
+        // If mutex is free, no deadlock possible
+        if requesting_mutex_id >= proc.mutex_holder.len() {
+            return true;
+        }
+        let holder = match proc.mutex_holder[requesting_mutex_id] {
+            Some(tid) => tid,
+            None => return true, // mutex is free
+        };
+        // If the holder is ourselves, it's a self-deadlock
+        if holder == requesting_tid {
+            return false;
+        }
+        // Follow wait-for chain from holder
+        let mut current = holder;
+        let mut visited = alloc::collections::BTreeSet::new();
+        visited.insert(requesting_tid);
+        visited.insert(current);
+        loop {
+            // What mutex is `current` waiting for?
+            let waited_mutex = match proc.mutex_wait.get(&current) {
+                Some(&mid) => mid,
+                None => return true, // not waiting, no cycle
+            };
+            // Who holds that mutex?
+            let next = match proc.mutex_holder.get(waited_mutex).and_then(|h| *h) {
+                Some(tid) => tid,
+                None => return true, // mutex is free, no cycle
+            };
+            if next == requesting_tid {
+                return false; // cycle detected!
+            }
+            if !visited.insert(next) {
+                // Already visited this thread, no path back to requester
+                return true;
+            }
+            current = next;
+        }
+    }
+
+    /// Semaphore deadlock detection via banker's algorithm.
+    /// Returns true if safe (no deadlock), false if unsafe.
+    fn check_sem_safety(proc: &crate::process::Process, requesting_tid: usize, requesting_sem_id: usize) -> bool {
+        let n_sem = proc.semaphore_list.len();
+
+        // If the resource is available, no blocking will occur, so no deadlock
+        let avail = if requesting_sem_id < proc.sem_available.len() {
+            proc.sem_available[requesting_sem_id]
+        } else { 0 };
+        if avail > 0 {
+            return true;
+        }
+
+        // The thread would block. Check if this creates a deadlock.
+        // Collect all thread IDs involved
+        let mut all_tids: alloc::collections::BTreeSet<usize> = alloc::collections::BTreeSet::new();
+        all_tids.insert(requesting_tid);
+        for alloc_map in &proc.sem_alloc {
+            for &tid in alloc_map.keys() {
+                all_tids.insert(tid);
+            }
+        }
+        for &tid in proc.sem_wait.keys() {
+            all_tids.insert(tid);
+        }
+        let tids: Vec<usize> = all_tids.into_iter().collect();
+        let n = tids.len();
+        if n == 0 { return true; }
+
+        // Work = Available (don't simulate granting since thread will block)
+        let mut work: Vec<isize> = (0..n_sem).map(|j| {
+            if j < proc.sem_available.len() { proc.sem_available[j] } else { 0 }
+        }).collect();
+
+        // Allocation[i][j] = resources held by thread i of type j
+        let mut allocation = vec![vec![0isize; n_sem]; n];
+        for (j, alloc_map) in proc.sem_alloc.iter().enumerate() {
+            for (&tid, &count) in alloc_map {
+                if let Some(idx) = tids.iter().position(|&t| t == tid) {
+                    allocation[idx][j] = count as isize;
+                }
+            }
+        }
+
+        // Need[i][j] = 1 if thread i is blocked waiting for sem j, else 0
+        let mut need = vec![vec![0isize; n_sem]; n];
+        for (&tid, &sem_id) in &proc.sem_wait {
+            if let Some(idx) = tids.iter().position(|&t| t == tid) {
+                if sem_id < n_sem {
+                    need[idx][sem_id] = 1;
+                }
+            }
+        }
+        // The requesting thread will also be waiting for the requested semaphore
+        let req_idx = tids.iter().position(|&t| t == requesting_tid).unwrap();
+        if requesting_sem_id < n_sem {
+            need[req_idx][requesting_sem_id] = 1;
+        }
+
+        // Banker's safety algorithm
+        let mut finish = vec![false; n];
+        loop {
+            let mut found = false;
+            for i in 0..n {
+                if finish[i] { continue; }
+                if (0..n_sem).all(|j| need[i][j] <= work[j]) {
+                    for j in 0..n_sem {
+                        work[j] += allocation[i][j];
+                    }
+                    finish[i] = true;
+                    found = true;
+                }
+            }
+            if !found { break; }
+        }
+        finish.iter().all(|&f| f)
     }
 }
 

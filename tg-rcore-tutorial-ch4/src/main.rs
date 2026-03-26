@@ -140,6 +140,9 @@ impl ProcessList {
 /// 全局进程列表实例。
 static PROCESSES: ProcessList = ProcessList::new();
 
+/// 当前进程的系统调用计数
+static mut SYSCALL_COUNTS: [u32; 500] = [0; 500];
+
 // ========== 内核主函数 ==========
 
 /// 内核主函数：初始化各子系统，建立内核地址空间，加载用户进程。
@@ -248,12 +251,18 @@ extern "C" fn schedule() -> ! {
 
                 let ctx = &mut ctx.context;
                 let id: Id = ctx.a(7).into();
+                // 统计系统调用次数
+                let id_num: usize = ctx.a(7);
+                if id_num < 500 {
+                    unsafe { SYSCALL_COUNTS[id_num] += 1 };
+                }
                 let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
                 match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
                     Ret::Done(ret) => match id {
-                        // exit：移除进程
+                        // exit：移除进程，重置计数
                         Id::EXIT => unsafe {
                             PROCESSES.get_mut().remove(0);
+                            SYSCALL_COUNTS = [0; 500];
                         },
                         // 其他系统调用：写回返回值，sepc += 4
                         _ => {
@@ -356,7 +365,7 @@ fn kernel_space(
 /// 与前几章不同，本章的系统调用实现需要进行**地址翻译**：
 /// 用户传入的指针是虚拟地址，内核需要通过页表将其翻译为物理地址才能访问。
 mod impls {
-    use crate::{build_flags, Sv39, PROCESSES};
+    use crate::{build_flags, parse_flags, Sv39, PROCESSES};
     use alloc::alloc::alloc_zeroed;
     use core::{alloc::Layout, ptr::NonNull};
     use tg_console::log;
@@ -555,34 +564,51 @@ mod impls {
         }
     }
 
-    /// Trace 系统调用实现（练习题需要完成的部分）
-    ///
-    /// 引入虚存机制后，原来的 trace 实现无效了，需要：
-    /// - 读取时检查用户地址是否可见且可读
-    /// - 写入时检查用户地址是否可见且可写
-    /// - 使用 translate() 方法进行地址翻译和权限检查
+    /// Trace 系统调用实现
     impl Trace for SyscallContext {
-        #[inline]
         fn trace(
             &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
+            caller: Caller,
+            trace_request: usize,
+            id: usize,
+            data: usize,
         ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+            let process = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+            match trace_request {
+                0 => {
+                    const READABLE: VmFlags<Sv39> = build_flags("U__RV");
+                    if let Some(ptr) = process.address_space.translate::<u8>(VAddr::new(id), READABLE) {
+                        unsafe { *ptr.as_ptr() as isize }
+                    } else {
+                        -1
+                    }
+                }
+                1 => {
+                    const WRITABLE: VmFlags<Sv39> = build_flags("U_W_V");
+                    if let Some(mut ptr) = process.address_space.translate::<u8>(VAddr::new(id), WRITABLE) {
+                        unsafe { *ptr.as_mut() = data as u8; }
+                        0
+                    } else {
+                        -1
+                    }
+                }
+                2 => {
+                    if id < 500 {
+                        unsafe { super::SYSCALL_COUNTS[id] as isize }
+                    } else {
+                        0
+                    }
+                }
+                _ => -1,
+            }
         }
     }
 
-    /// Memory 系统调用实现（练习题需要完成的部分）
-    ///
-    /// - `mmap`：将物理内存映射到用户虚拟地址空间
-    /// - `munmap`：取消虚拟内存映射
+    /// Memory 系统调用实现
     impl Memory for SyscallContext {
         fn mmap(
             &self,
-            _caller: Caller,
+            caller: Caller,
             addr: usize,
             len: usize,
             prot: i32,
@@ -590,15 +616,56 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+            if addr % PAGE_SIZE != 0 { return -1; }
+            if prot & !0x7 != 0 { return -1; }
+            if prot & 0x7 == 0 { return -1; }
+
+            let process = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+            if len == 0 { return 0; }
+
+            let len_aligned = len.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            let start_vpn = VPN::<Sv39>::new(addr >> Sv39::PAGE_BITS);
+            let end_vpn = VPN::<Sv39>::new((addr + len_aligned) >> Sv39::PAGE_BITS);
+
+            const CHECK: VmFlags<Sv39> = build_flags("__V");
+            for vpn_val in start_vpn.val()..end_vpn.val() {
+                let va = VAddr::<Sv39>::new(vpn_val << Sv39::PAGE_BITS);
+                if process.address_space.translate::<u8>(va, CHECK).is_some() {
+                    return -1;
+                }
+            }
+
+            let mut flags_str: [u8; 5] = *b"U___V";
+            if prot & 0x4 != 0 { flags_str[1] = b'X'; }
+            if prot & 0x2 != 0 { flags_str[2] = b'W'; }
+            if prot & 0x1 != 0 { flags_str[3] = b'R'; }
+            let flags = parse_flags(unsafe { core::str::from_utf8_unchecked(&flags_str) }).unwrap();
+            process.address_space.map(start_vpn..end_vpn, &[], 0, flags);
+            0
         }
 
-        fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+        fn munmap(&self, caller: Caller, addr: usize, len: usize) -> isize {
+            const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+            if addr % PAGE_SIZE != 0 { return -1; }
+
+            let process = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+            if len == 0 { return 0; }
+
+            let len_aligned = len.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            let start_vpn = VPN::<Sv39>::new(addr >> Sv39::PAGE_BITS);
+            let end_vpn = VPN::<Sv39>::new((addr + len_aligned) >> Sv39::PAGE_BITS);
+
+            const CHECK: VmFlags<Sv39> = build_flags("__V");
+            for vpn_val in start_vpn.val()..end_vpn.val() {
+                let va = VAddr::<Sv39>::new(vpn_val << Sv39::PAGE_BITS);
+                if process.address_space.translate::<u8>(va, CHECK).is_none() {
+                    return -1;
+                }
+            }
+
+            process.address_space.unmap(start_vpn..end_vpn);
+            0
         }
     }
 }

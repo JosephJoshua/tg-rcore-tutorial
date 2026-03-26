@@ -24,7 +24,14 @@ Cargo.lock
 *.tmp
 *.log
 
-# compressed file for submodules 
+# compressed file for submodules
 # bundle/submodules.tar.gz
 # Extracted workspace (optional - uncomment if you want to ignore extracted content)
 # workspace-full/
+
+# Auto-fetched user programs (pulled at build time by each chapter)
+**/tg-rcore-tutorial-user/
+
+# Locally cloned dependency crates (for exercises)
+tg-rcore-tutorial-ch4/tg-rcore-tutorial-kernel-vm/
+tg-rcore-tutorial-ch6/tg-rcore-tutorial-easy-fs/

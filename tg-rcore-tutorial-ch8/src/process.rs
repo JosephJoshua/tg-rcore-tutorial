@@ -27,7 +27,7 @@ use crate::{
     build_flags, fs::Fd, map_portal, parse_flags, processor::ProcessorInner, Sv39, Sv39Manager,
     PROCESSOR,
 };
-use alloc::{alloc::alloc_zeroed, boxed::Box, sync::Arc, vec::Vec};
+use alloc::{alloc::alloc_zeroed, boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::alloc::Layout;
 use spin::Mutex;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
@@ -84,6 +84,18 @@ pub struct Process {
     pub mutex_list: Vec<Option<Arc<dyn MutexTrait>>>,
     /// 条件变量列表（**本章新增**，所有线程共享）
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// 是否启用死锁检测
+    pub deadlock_detect_enabled: bool,
+    /// 互斥锁持有者追踪：mutex_holder[mutex_id] = Some(tid)
+    pub mutex_holder: Vec<Option<usize>>,
+    /// 线程等待互斥锁追踪：tid -> mutex_id
+    pub mutex_wait: BTreeMap<usize, usize>,
+    /// 信号量可用计数追踪
+    pub sem_available: Vec<isize>,
+    /// 信号量分配追踪：sem_alloc[sem_id][tid] = count
+    pub sem_alloc: Vec<BTreeMap<usize, usize>>,
+    /// 线程等待信号量追踪：tid -> sem_id
+    pub sem_wait: BTreeMap<usize, usize>,
 }
 
 impl Process {
@@ -134,6 +146,12 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                deadlock_detect_enabled: false,
+                mutex_holder: Vec::new(),
+                mutex_wait: BTreeMap::new(),
+                sem_available: Vec::new(),
+                sem_alloc: Vec::new(),
+                sem_wait: BTreeMap::new(),
             },
             thread,
         ))
@@ -206,6 +224,12 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                deadlock_detect_enabled: false,
+                mutex_holder: Vec::new(),
+                mutex_wait: BTreeMap::new(),
+                sem_available: Vec::new(),
+                sem_alloc: Vec::new(),
+                sem_wait: BTreeMap::new(),
             },
             thread,
         ))
