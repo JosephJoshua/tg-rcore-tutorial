@@ -32,8 +32,10 @@ extern crate alloc;
 use tg_sbi::{console_putchar, shutdown};
 
 #[cfg(target_arch = "riscv64")]
-#[allow(dead_code)]
 mod allocator;
+
+#[cfg(target_arch = "riscv64")]
+mod gpu;
 
 /// S 态程序入口点。
 ///
@@ -73,6 +75,34 @@ extern "C" fn rust_main() -> ! {
     for c in b"Hello, world!\n" {
         console_putchar(*c);
     }
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        let (mut gpu, fb) = gpu::init();
+        // Fill screen red (BGRA: B=0, G=0, R=0xFF, A=0xFF)
+        let buf = unsafe { core::slice::from_raw_parts_mut(fb.ptr, fb.len) };
+        for pixel in buf.chunks_exact_mut(4) {
+            pixel[0] = 0x00; // B
+            pixel[1] = 0x00; // G
+            pixel[2] = 0xFF; // R
+            pixel[3] = 0xFF; // A
+        }
+        gpu.flush().expect("flush failed");
+
+        // Spin-wait ~3 seconds so the image is visible.
+        // rdtime returns a cycle count; QEMU virt runs at 10 MHz.
+        let start: usize;
+        unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
+        let delay = 3 * 10_000_000; // 3 seconds at 10 MHz
+        loop {
+            let now: usize;
+            unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
+            if now - start >= delay {
+                break;
+            }
+        }
+    }
+
     shutdown(false) // false 表示正常关机
 }
 
