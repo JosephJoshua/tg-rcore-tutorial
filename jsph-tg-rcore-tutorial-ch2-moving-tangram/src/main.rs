@@ -75,7 +75,7 @@ const SYSCALL_FB_WRITE: usize = 2001;
 #[cfg(target_arch = "riscv64")]
 core::arch::global_asm!(include_str!(env!("APP_ASM")));
 
-// 定义内核入口点：设置 8 页（32 KiB）的内核栈，然后跳转到 rust_main。
+// 定义内核入口点：设置 16 页（64 KiB）的内核栈，然后跳转到 rust_main。
 //
 // 这里不再调用 tg_linker::boot0! 宏，避免外部已发布版本与 Rust 2024
 // 在属性语义上的兼容差异影响本 crate 的发布校验。
