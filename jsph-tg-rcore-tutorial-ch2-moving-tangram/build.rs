@@ -110,6 +110,13 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
         TARGET_ARCH,
     ]);
 
+    // Work around Rust 2024 unsafe_op_in_unsafe_fn lint in local tg-rcore-tutorial-syscall.
+    // The crates.io version was published with an older edition; the local copy uses edition 2024
+    // but has asm! blocks in unsafe fns without explicit unsafe {} wrappers.
+    // Must remove CARGO_ENCODED_RUSTFLAGS (set by parent cargo) or it takes precedence.
+    cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
+    cmd.env("RUSTFLAGS", "-A unsafe_op_in_unsafe_fn");
+
     if base_address != 0 {
         cmd.env("BASE_ADDRESS", base_address.to_string());
     }
