@@ -4,10 +4,15 @@ use crate::allocator::HalImpl;
 use core::ptr::NonNull;
 use virtio_drivers::{MmioTransport, VirtIOGpu, VirtIOHeader};
 
-/// VirtIO MMIO base address for bus slot 0 on QEMU virt platform.
-const VIRTIO0: usize = 0x10001000;
+/// QEMU virt platform has 8 VirtIO MMIO slots at 0x10001000..0x10008000.
+/// Devices are assigned to the highest slot first, so we probe all slots.
+const VIRTIO_MMIO_BASE: usize = 0x10001000;
+/// Last MMIO slot address.
+const VIRTIO_MMIO_END: usize = 0x10008000;
+/// Stride between MMIO slots.
+const VIRTIO_MMIO_STRIDE: usize = 0x1000;
 
-/// Screen width and height (populated after GPU init).
+/// Framebuffer descriptor returned by GPU initialization.
 pub struct Framebuffer {
     /// Raw pointer to the pixel buffer (BGRA format, 4 bytes per pixel).
     pub ptr: *mut u8,
@@ -22,11 +27,20 @@ pub struct Framebuffer {
 /// Initialize the VirtIO-GPU device, set up the framebuffer, and return
 /// a raw pointer to the pixel buffer (BGRA format, 4 bytes per pixel).
 ///
-/// Also returns a mutable reference to the GPU driver for flushing.
+/// Also returns the GPU driver for flushing.
 pub fn init() -> (VirtIOGpu<'static, HalImpl, MmioTransport>, Framebuffer) {
-    let header = NonNull::new(VIRTIO0 as *mut VirtIOHeader).expect("null VirtIOHeader");
-    let transport =
-        unsafe { MmioTransport::new(header) }.expect("failed to create MmioTransport");
+    // Probe all MMIO slots to find the GPU device.
+    let mut transport = None;
+    let mut addr = VIRTIO_MMIO_BASE;
+    while addr <= VIRTIO_MMIO_END {
+        let header = NonNull::new(addr as *mut VirtIOHeader).unwrap();
+        if let Ok(t) = unsafe { MmioTransport::new(header) } {
+            transport = Some(t);
+            break;
+        }
+        addr += VIRTIO_MMIO_STRIDE;
+    }
+    let transport = transport.expect("no VirtIO device found on any MMIO slot");
     let mut gpu = VirtIOGpu::new(transport).expect("failed to create VirtIOGpu");
 
     let (width, height) = gpu.resolution().expect("failed to get resolution");

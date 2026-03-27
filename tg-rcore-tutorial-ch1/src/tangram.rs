@@ -146,37 +146,59 @@ pub fn fill_polygon(fb: &mut [u8], width: u32, height: u32, vertices: &[(i32, i3
 }
 
 // ---- Tangram "O" pieces ----
-const O_TRI_L1: [(i32, i32); 3] = [(140, 144), (140, 624), (300, 384)];
-const O_TRI_L2: [(i32, i32); 3] = [(140, 144), (460, 144), (300, 384)];
-const O_TRI_M: [(i32, i32); 3] = [(460, 144), (460, 304), (300, 384)];
-const O_TRI_R: [(i32, i32); 3] = [(460, 304), (460, 624), (300, 384)];
-const O_TRI_S1: [(i32, i32); 3] = [(460, 624), (300, 624), (300, 384)];
-const O_TRI_S2: [(i32, i32); 3] = [(300, 624), (140, 624), (300, 384)];
-const O_PARA: [(i32, i32); 4] = [(220, 504), (300, 384), (380, 504), (300, 624)];
+// O is a rectangular frame with a hole in the center.
+// Outer: (140,184)→(440,584), Inner hole: (220,274)→(360,494)
+//
+// Decomposition: top bar (2 tri), left bar (rect), right bar (rect),
+//                bottom bar (3 tri) = 7 pieces.
+
+// Top bar: split diagonally
+const O1: [(i32, i32); 3] = [(140, 184), (440, 184), (140, 274)];
+const O2: [(i32, i32); 3] = [(440, 184), (440, 274), (140, 274)];
+// Left bar
+const O3: [(i32, i32); 4] = [(140, 274), (220, 274), (220, 494), (140, 494)];
+// Right bar
+const O4: [(i32, i32); 4] = [(360, 274), (440, 274), (440, 494), (360, 494)];
+// Bottom bar: split into 3 triangles meeting at bottom-center
+const O5: [(i32, i32); 3] = [(140, 494), (440, 494), (290, 584)];
+const O6: [(i32, i32); 3] = [(140, 494), (290, 584), (140, 584)];
+const O7: [(i32, i32); 3] = [(440, 494), (440, 584), (290, 584)];
 
 // ---- Tangram "S" pieces ----
-const S_TRI_L1: [(i32, i32); 3] = [(540, 144), (860, 144), (540, 464)];
-const S_TRI_L2: [(i32, i32); 3] = [(860, 144), (860, 464), (540, 464)];
-const S_TRI_M: [(i32, i32); 3] = [(860, 464), (700, 464), (700, 304)];
-const S_TRI_R: [(i32, i32); 3] = [(540, 464), (860, 464), (860, 624)];
-const S_TRI_S1: [(i32, i32); 3] = [(540, 464), (540, 624), (700, 624)];
-const S_TRI_S2: [(i32, i32); 3] = [(700, 624), (860, 624), (860, 464)];
-const S_PARA: [(i32, i32); 4] = [(540, 464), (700, 304), (700, 464), (540, 624)];
+// S is two offset rectangular blocks forming a Z/S shape.
+// Top block (right-aligned): (580,184)→(840,384), 260×200
+// Bottom block (left-aligned): (540,384)→(800,584), 260×200
+// Both blocks are 260px wide for symmetry.
+//
+// Top block: 3 triangles meeting at bottom-center (710,384)
+// Bottom block: 4 triangles meeting at center (670,484)
+
+// Top block
+const S1: [(i32, i32); 3] = [(580, 184), (840, 184), (710, 384)];
+const S2: [(i32, i32); 3] = [(580, 184), (710, 384), (580, 384)];
+const S3: [(i32, i32); 3] = [(840, 184), (840, 384), (710, 384)];
+// Bottom block
+const S4: [(i32, i32); 3] = [(540, 384), (800, 384), (670, 484)];
+const S5: [(i32, i32); 3] = [(540, 384), (670, 484), (540, 584)];
+const S6: [(i32, i32); 3] = [(800, 384), (800, 584), (670, 484)];
+const S7: [(i32, i32); 3] = [(540, 584), (670, 484), (800, 584)];
 
 /// All 14 tangram pieces for the "OS" display.
 pub static PIECES: [Piece; 14] = [
-    Piece { vertices: &O_TRI_L1, color_idx: 0 },
-    Piece { vertices: &O_TRI_L2, color_idx: 1 },
-    Piece { vertices: &O_TRI_M,  color_idx: 2 },
-    Piece { vertices: &O_TRI_R,  color_idx: 3 },
-    Piece { vertices: &O_TRI_S1, color_idx: 4 },
-    Piece { vertices: &O_TRI_S2, color_idx: 5 },
-    Piece { vertices: &O_PARA,   color_idx: 6 },
-    Piece { vertices: &S_TRI_L1, color_idx: 4 },
-    Piece { vertices: &S_TRI_L2, color_idx: 5 },
-    Piece { vertices: &S_TRI_M,  color_idx: 6 },
-    Piece { vertices: &S_TRI_R,  color_idx: 0 },
-    Piece { vertices: &S_TRI_S1, color_idx: 1 },
-    Piece { vertices: &S_TRI_S2, color_idx: 2 },
-    Piece { vertices: &S_PARA,   color_idx: 3 },
+    // "O" — 7 pieces (frame with hole)
+    Piece { vertices: &O1, color_idx: 0 }, // Red
+    Piece { vertices: &O2, color_idx: 1 }, // Orange
+    Piece { vertices: &O3, color_idx: 2 }, // Yellow
+    Piece { vertices: &O4, color_idx: 3 }, // Green
+    Piece { vertices: &O5, color_idx: 4 }, // Cyan
+    Piece { vertices: &O6, color_idx: 5 }, // Blue
+    Piece { vertices: &O7, color_idx: 6 }, // Magenta
+    // "S" — 7 pieces (two offset blocks)
+    Piece { vertices: &S1, color_idx: 4 }, // Cyan
+    Piece { vertices: &S2, color_idx: 5 }, // Blue
+    Piece { vertices: &S3, color_idx: 0 }, // Red
+    Piece { vertices: &S4, color_idx: 6 }, // Magenta
+    Piece { vertices: &S5, color_idx: 1 }, // Orange
+    Piece { vertices: &S6, color_idx: 3 }, // Green
+    Piece { vertices: &S7, color_idx: 2 }, // Yellow
 ];

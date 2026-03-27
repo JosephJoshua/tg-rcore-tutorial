@@ -97,14 +97,18 @@ extern "C" fn rust_main() -> ! {
 
         gpu.flush().expect("flush failed");
 
-        // Wait ~3 seconds so the image is visible before shutdown.
+        // Wait for keypress or ~10 second timeout, whichever comes first.
         // QEMU virt timer runs at 10 MHz.
+        let timeout = 10 * 10_000_000;
         let start: usize;
         unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
         loop {
+            if tg_sbi::console_getchar() != usize::MAX {
+                break;
+            }
             let now: usize;
             unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
-            if now - start >= 3 * 10_000_000 {
+            if now - start >= timeout {
                 break;
             }
         }

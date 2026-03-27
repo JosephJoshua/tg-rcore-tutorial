@@ -4,12 +4,14 @@
 cargo build 2>&1
 BINARY="target/riscv64gc-unknown-none-elf/debug/tg-rcore-tutorial-ch1"
 
-# Run QEMU in headless mode (no GPU window) for serial-only testing
-OUTPUT=$(qemu-system-riscv64 \
+# Run QEMU with GPU device in headless mode, with a timeout to catch hangs.
+# The kernel waits up to 10s after rendering; give it 20s total.
+OUTPUT=$(timeout 20 qemu-system-riscv64 \
     -machine virt \
     -display none \
     -serial stdio \
     -bios none \
+    -device virtio-gpu-device \
     -kernel "$BINARY" 2>&1)
 
 if echo "$OUTPUT" | grep -q "Hello, world!"; then
