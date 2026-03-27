@@ -63,6 +63,11 @@ static mut GPU: Option<VirtIOGpu<'static, allocator::HalImpl, MmioTransport>> = 
 #[cfg(target_arch = "riscv64")]
 static mut FRAMEBUFFER: Option<gpu::Framebuffer> = None;
 
+/// Custom syscall IDs for framebuffer operations.
+/// These are handled directly in handle_syscall, bypassing tg_syscall::handle.
+const SYSCALL_FB_INFO: usize = 2000;
+const SYSCALL_FB_WRITE: usize = 2001;
+
 // ========== 启动相关 ==========
 
 // 将用户程序的二进制数据内联到内核镜像的 .data 段中
@@ -210,31 +215,91 @@ enum SyscallResult {
     Error(SyscallId),
 }
 
-/// 处理系统调用。
-///
-/// 从用户上下文中提取系统调用 ID（a7 寄存器）和参数（a0-a5 寄存器），
-/// 分发到对应的处理函数，并将返回值写回 a0 寄存器。
 fn handle_syscall(ctx: &mut LocalContext) -> SyscallResult {
     use tg_syscall::{SyscallId as Id, SyscallResult as Ret};
 
-    // a7 寄存器存放 syscall ID
-    let id = ctx.a(7).into();
-    // a0-a5 寄存器存放系统调用参数
+    let id_raw: usize = ctx.a(7);
     let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
 
+    // Intercept custom framebuffer syscalls before standard dispatch
+    #[cfg(target_arch = "riscv64")]
+    match id_raw {
+        SYSCALL_FB_INFO => {
+            let ret = handle_fb_info();
+            *ctx.a_mut(0) = ret as usize;
+            ctx.move_next();
+            return SyscallResult::Done;
+        }
+        SYSCALL_FB_WRITE => {
+            let ret = handle_fb_write(args[0], args[1], args[2], args[3], args[4]);
+            *ctx.a_mut(0) = ret as usize;
+            ctx.move_next();
+            return SyscallResult::Done;
+        }
+        _ => {}
+    }
+
+    let id: Id = id_raw.into();
     match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
         Ret::Done(ret) => match id {
             Id::EXIT => SyscallResult::Exit(ctx.a(0)),
             _ => {
-                // 将返回值写入 a0
                 *ctx.a_mut(0) = ret as _;
-                // sepc += 4，使 sret 后从 ecall 的下一条指令继续执行
                 ctx.move_next();
                 SyscallResult::Done
             }
         },
         Ret::Unsupported(id) => SyscallResult::Error(id),
     }
+}
+
+/// FB_INFO syscall: returns (width << 32) | height packed in a0.
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_info() -> usize {
+    // SAFETY: single-threaded kernel; FRAMEBUFFER is set once in rust_main before apps run.
+    let (width, height) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.width, fb.height)
+    };
+    ((width as usize) << 32) | (height as usize)
+}
+
+/// FB_WRITE syscall: copy user pixel data into framebuffer and flush.
+/// Args: a0=x, a1=y, a2=w, a3=h, a4=data_ptr
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> usize {
+    // SAFETY: single-threaded kernel; GPU/FRAMEBUFFER are set once before apps run.
+    let (fb_ptr, fb_len, fb_w, fb_h) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.ptr, fb.len, fb.width as usize, fb.height as usize)
+    };
+
+    // Bounds check
+    if x + w > fb_w || y + h > fb_h || w == 0 || h == 0 {
+        return usize::MAX; // -1 as usize
+    }
+
+    let fb_buf = unsafe { core::slice::from_raw_parts_mut(fb_ptr, fb_len) };
+    let user_data = unsafe { core::slice::from_raw_parts(data_ptr as *const u8, w * h * 4) };
+
+    // Copy row-by-row into framebuffer
+    for row in 0..h {
+        let fb_offset = ((y + row) * fb_w + x) * 4;
+        let src_offset = row * w * 4;
+        fb_buf[fb_offset..fb_offset + w * 4]
+            .copy_from_slice(&user_data[src_offset..src_offset + w * 4]);
+    }
+
+    // Flush display
+    let gpu = unsafe {
+        let p = &raw mut GPU;
+        (*p).as_mut().expect("GPU not initialized")
+    };
+    gpu.flush().expect("GPU flush failed");
+
+    0
 }
 
 // ========== 接口实现 ==========
