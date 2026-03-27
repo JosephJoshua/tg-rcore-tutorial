@@ -14,6 +14,43 @@ use tg_console::log;
 pub use tg_console::{print, println};
 pub use tg_syscall::*;
 
+#[cfg(feature = "tangram")]
+pub mod tangram;
+
+/// Query framebuffer dimensions from kernel.
+/// Returns (width, height).
+pub fn fb_info() -> (u32, u32) {
+    let packed: usize;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2000usize,
+            lateout("a0") packed,
+        );
+    }
+    let width = (packed >> 32) as u32;
+    let height = packed as u32;
+    (width, height)
+}
+
+/// Write a rectangular BGRA pixel region to the kernel framebuffer.
+/// The kernel copies the data and flushes the display.
+pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
+    let ret: isize;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2001usize,
+            inlateout("a0") x as usize => ret,
+            in("a1") y as usize,
+            in("a2") w as usize,
+            in("a3") h as usize,
+            in("a4") data as usize,
+        );
+    }
+    ret
+}
+
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 pub extern "C" fn _start() -> ! {
