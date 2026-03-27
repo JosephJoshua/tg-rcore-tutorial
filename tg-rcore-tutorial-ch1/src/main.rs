@@ -54,7 +54,7 @@ mod tangram;
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
-    // 栈大小：4 KiB
+    // 栈大小：64 KiB（VirtIO-GPU 初始化需要较大栈空间）
     const STACK_SIZE: usize = 64 * 1024;
 
     // 在 .bss.uninit 段中分配栈空间
