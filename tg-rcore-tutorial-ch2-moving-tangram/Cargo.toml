@@ -1,7 +1,7 @@
 [package]
 name = "jsph-tg-rcore-tutorial-ch2-moving-tangram"
 description = "Chapter 2 moving tangram extension: VirtIO-GPU animated 'OS' tangram display via batch processing"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2024"
 authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
 repository = "https://github.com/JosephJoshua/tg-rcore-tutorial"

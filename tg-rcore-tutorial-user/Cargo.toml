@@ -1,12 +1,12 @@
 [package]
-name = "tg-rcore-tutorial-user"
-description = "User-space apps for rCore Tutorial chapters (subset for ch2)."
-version = "0.4.8"
+name = "jsph-tg-rcore-tutorial-user"
+description = "User-space apps for rCore Tutorial chapters with tangram GPU rendering support."
+version = "0.4.9"
 edition = "2024"
-authors = ["YdrMaster <ydrml@hotmail.com>"]
-repository = "https://github.com/rcore-os/tg-rcore-tutorial-user"
-homepage = "https://github.com/rcore-os/tg-rcore-tutorial-user/tree/test"
-documentation = "https://docs.rs/tg-rcore-tutorial-user"
+authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
+repository = "https://github.com/JosephJoshua/tg-rcore-tutorial"
+homepage = "https://github.com/JosephJoshua/tg-rcore-tutorial"
+documentation = "https://docs.rs/jsph-tg-rcore-tutorial-user"
 license = "GPL-3.0"
 readme = "README.md"
 keywords = ["rcore", "tutorial", "no-std", "riscv", "user-apps"]
@@ -23,8 +23,8 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
-tg-console = { package = "tg-rcore-tutorial-console", path = "../tg-rcore-tutorial-console", version = "0.4.2-preview.7" }
-tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.2-preview.7", features = ["user"] }
+tg-console = { package = "tg-rcore-tutorial-console", version = "0.4.8" }
+tg-syscall = { package = "tg-rcore-tutorial-syscall", version = "0.4.8", features = ["user"] }
 customizable-buddy = "0.0.2"
 
 [features]
