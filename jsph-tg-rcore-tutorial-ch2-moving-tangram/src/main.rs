@@ -25,10 +25,19 @@
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 // 非 RISC-V64 架构允许死代码（用于 cargo publish --dry-run 在主机上通过编译）
 #![cfg_attr(not(target_arch = "riscv64"), allow(dead_code))]
+// Allocator needed for VirtIO DMA pool
+#[cfg(target_arch = "riscv64")]
+extern crate alloc;
 
 // 引入控制台输出宏（print! / println!），由 tg_console 库提供
 #[macro_use]
 extern crate tg_console;
+
+#[cfg(target_arch = "riscv64")]
+mod allocator;
+
+#[cfg(target_arch = "riscv64")]
+mod gpu;
 
 // 本地模块：Console 和 SyscallContext 的实现
 use impls::{Console, SyscallContext};
@@ -42,6 +51,17 @@ use tg_kernel_context::LocalContext;
 use tg_sbi;
 // 系统调用相关：调用者信息、系统调用 ID
 use tg_syscall::{Caller, SyscallId};
+
+#[cfg(target_arch = "riscv64")]
+use virtio_drivers::{MmioTransport, VirtIOGpu};
+
+/// Global GPU driver, initialized once in rust_main before the batch loop.
+#[cfg(target_arch = "riscv64")]
+static mut GPU: Option<VirtIOGpu<'static, allocator::HalImpl, MmioTransport>> = None;
+
+/// Global framebuffer info, initialized once in rust_main.
+#[cfg(target_arch = "riscv64")]
+static mut FRAMEBUFFER: Option<gpu::Framebuffer> = None;
 
 // ========== 启动相关 ==========
 
@@ -59,7 +79,7 @@ core::arch::global_asm!(include_str!(env!("APP_ASM")));
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
-    const STACK_SIZE: usize = 8 * 4096;
+    const STACK_SIZE: usize = 16 * 4096; // 64 KiB — VirtIO-GPU init needs extra stack
     #[unsafe(link_section = ".boot.stack")]
     static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
 
@@ -87,6 +107,31 @@ extern "C" fn rust_main() -> ! {
     // 第三步：初始化系统调用处理（注册 IO 和 Process 的实现）
     tg_syscall::init_io(&SyscallContext);
     tg_syscall::init_process(&SyscallContext);
+
+    // Initialize VirtIO-GPU and fill white background
+    #[cfg(target_arch = "riscv64")]
+    {
+        let (gpu_driver, fb_info) = gpu::init();
+        let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
+
+        // Fill white background (BGRA: all 0xFF)
+        for byte in buf.iter_mut() {
+            *byte = 0xFF;
+        }
+
+        // Initial flush to show white screen
+        let mut gpu_driver = gpu_driver;
+        gpu_driver.flush().expect("GPU flush failed");
+
+        // Store globally for syscall handlers
+        unsafe {
+            GPU = Some(gpu_driver);
+            FRAMEBUFFER = Some(fb_info);
+        }
+
+        // Enable rdtime in U-mode for user-space spin-wait timing
+        unsafe { core::arch::asm!("csrs scounteren, {}", in(reg) (1 << 1)) };
+    }
 
     // 第四步：批处理——依次加载并运行每个用户程序
     for (i, app) in tg_linker::AppMeta::locate().iter().enumerate() {
