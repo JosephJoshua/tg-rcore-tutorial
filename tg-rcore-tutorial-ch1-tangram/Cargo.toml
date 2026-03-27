@@ -1,0 +1,23 @@
+[package]
+name = "jsph-tg-rcore-tutorial-ch1-tangram"
+description = "Chapter 1 tangram extension: VirtIO-GPU 'OS' tangram display on bare-metal RISC-V"
+version = "0.4.8"
+edition = "2024"
+authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
+repository = "https://github.com/JosephJoshua/tg-rcore-tutorial"
+license = "GPL-3.0"
+readme = "README.md"
+keywords = ["rcore", "tutorial", "no-std", "riscv", "tangram"]
+categories = ["no-std", "embedded"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+tg-sbi = { package = "tg-rcore-tutorial-sbi", version = "0.4.8", features = ["nobios"] }
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+virtio-drivers = "0.1.0"

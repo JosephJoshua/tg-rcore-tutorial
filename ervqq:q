@@ -1,0 +1,528 @@
+[33mcommit 135192ce313eb36312a415981fddd7de7c45e79d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mtest[m[33m)[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Fri Mar 27 07:04:15 2026 +0000
+
+    fix(ch1): correct stack size comment (64 KiB, not 4 KiB)
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit f7ad75cf0a8a2bc0157aed7f44a612b35e226932[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Fri Mar 27 06:55:37 2026 +0000
+
+    feat(ch1): render tangram 'OS' pattern via VirtIO-GPU framebuffer
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit f610e4d97278514af72f368d3ca66b7e8e0b7a41[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Fri Mar 27 06:52:34 2026 +0000
+
+    feat(ch1): tangram 'OS' piece geometry and color mapping
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit ec94b18b0504277ee0e20ae96a5969c2a85368a2[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Fri Mar 27 06:46:16 2026 +0000
+
+    feat(ch1): polygon rasterizer with test triangle
+    
+    Add scanline-based polygon fill using integer-only math. Replace red
+    screen smoke test with white background and a test triangle rendered
+    via the new tangram module. Remove unnecessary #[allow(dead_code)] from
+    Framebuffer now that width/height are used by the rasterizer.
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit 98b0f902341803e39e875ef8e1713c68b8facc23[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Thu Mar 26 19:40:01 2026 +0000
+
+    feat(ch1): VirtIO-GPU init with red screen smoke test
+    
+    Add gpu.rs module that initializes the VirtIO-GPU device via MMIO
+    transport, sets up the framebuffer, and exposes raw pixel buffer access.
+    Wire it into rust_main to fill the screen red (BGRA) and flush, then
+    spin-wait 3 seconds before shutdown. Remove now-unnecessary
+    #[allow(dead_code)] from allocator module since HalImpl is used by gpu.
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit 15c9a9cba9784599240338f33bd40d1c14919422[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Thu Mar 26 19:34:59 2026 +0000
+
+    feat(ch1): add static bump allocator and VirtIO Hal implementation
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit 9aa75215a4537ab4bc74299018ab8726a1b3cac7[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Thu Mar 26 19:30:41 2026 +0000
+
+    feat(ch1): configure QEMU for VirtIO-GPU and add virtio-drivers dep
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+[33mcommit 8d8ae6354b94979867419a8b286c7cd77e68ab7e[m[33m ([m[1;31morigin/test[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Thu Mar 26 18:47:47 2026 +0000
+
+    build: change package names for publishing
+
+[33mcommit b38a6cd89678a812e543478b75333377ce5cff98[m
+Author: JosephJoshua <jj.anggita@gmail.com>
+Date:   Thu Mar 26 18:37:26 2026 +0000
+
+    feat: complete basic exercises 1-5
+
+[33mcommit 39a827bc274ddece9adb7793e89ab9f7b77b8549[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:44:28 2026 +0800
+
+    udpate README.md
+
+[33mcommit aca36ec718e71e8bd148a0635e0d0fecd8b6d3ff[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:39:41 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-user
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-user"
+      merged:   "b3a55db"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-user.git"
+      branch:   "test"
+      commit:   "b3a55db"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 7a1be8be3b9705ce74c2479a12ecd2e48c27c820[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:39:31 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-task-manage
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-task-manage"
+      merged:   "3957023"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-task-manage.git"
+      branch:   "test"
+      commit:   "3957023"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit efd0d255b6a50aa384df9e0f207176a4afcd5045[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:39:22 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-syscall
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-syscall"
+      merged:   "35fad6d"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-syscall.git"
+      branch:   "test"
+      commit:   "35fad6d"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 592a17104a76d67ef346330ca27bf6278b87ecdb[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:39:13 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-sync
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-sync"
+      merged:   "b275a82"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-sync.git"
+      branch:   "test"
+      commit:   "b275a82"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit a55d82ea744debe7dd23342d32ff037c5ca12251[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:59 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-signal-impl
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-signal-impl"
+      merged:   "8a3f6b1"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-signal-impl.git"
+      branch:   "test"
+      commit:   "8a3f6b1"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 58a129059e4bd5c89901b02c53919aae087dbb7b[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:50 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-signal-defs
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-signal-defs"
+      merged:   "c2da6fb"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-signal-defs.git"
+      branch:   "test"
+      commit:   "c2da6fb"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit b04ff7bbe84a491112762cf871afddf0782a6eba[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:40 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-signal
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-signal"
+      merged:   "a3ebc68"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-signal.git"
+      branch:   "test"
+      commit:   "a3ebc68"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit cedba6a59f277af402ac7b260989be38abf0913e[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:26 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-sbi
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-sbi"
+      merged:   "f40c672"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-sbi.git"
+      branch:   "test"
+      commit:   "f40c672"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit fa4f6531f9df06fd280788df3362c0e7ad256624[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:19 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-linker
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-linker"
+      merged:   "aac943b"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-linker.git"
+      branch:   "test"
+      commit:   "aac943b"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 9db7e99a1d48c9924d420c53ae22f41a7238424f[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:10 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-kernel-vm
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-kernel-vm"
+      merged:   "da20538"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-kernel-vm.git"
+      branch:   "test"
+      commit:   "da20538"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit c24ba36d17bae5350dca683466f4f9c8a202b0b9[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:38:01 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-kernel-context
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-kernel-context"
+      merged:   "fa5acab"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-kernel-context.git"
+      branch:   "test"
+      commit:   "fa5acab"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 232a9310fa5258fbfbe6a18bba158e46438234bb[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:52 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-kernel-alloc
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-kernel-alloc"
+      merged:   "94e877f"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-kernel-alloc.git"
+      branch:   "test"
+      commit:   "94e877f"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit c5def745101db4967ab686cf336bc12e20ed223a[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:43 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-easy-fs
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-easy-fs"
+      merged:   "158ae69"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-easy-fs.git"
+      branch:   "test"
+      commit:   "158ae69"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 1847de83ca232952e38b267e197013ba07974d01[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:31 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-console
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-console"
+      merged:   "9f5c91d"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-console.git"
+      branch:   "test"
+      commit:   "9f5c91d"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit d09b6cf23dc83f048b0ad3ad5496c0dbd4b2ecd7[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:21 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-checker
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-checker"
+      merged:   "92669c9"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-checker.git"
+      branch:   "test"
+      commit:   "92669c9"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 49a64818957929ceee18e4d1f7a9306353359cdc[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:13 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch8
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch8"
+      merged:   "741b779"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch8.git"
+      branch:   "test"
+      commit:   "741b779"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 3628db6fd8b8d2d79beb73f01290f37b98acb30b[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:37:06 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch7
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch7"
+      merged:   "5a8a418"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch7.git"
+      branch:   "test"
+      commit:   "5a8a418"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit aef51605732dc1a0e8c9683aee4064db77e28c42[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:55 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch6
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch6"
+      merged:   "605f064"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch6.git"
+      branch:   "test"
+      commit:   "605f064"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit af3fc13b44cd219c96b363be188d304375850134[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:48 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch5
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch5"
+      merged:   "1d6badb"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch5.git"
+      branch:   "test"
+      commit:   "1d6badb"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 47cb990455f4f7d36785d132064490e1367d86e9[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:41 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch4
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch4"
+      merged:   "3af367a"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch4.git"
+      branch:   "test"
+      commit:   "3af367a"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 0cb143346eff4868fd7a35547d94d9731c95bef6[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:34 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch3
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch3"
+      merged:   "33db620"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch3.git"
+      branch:   "test"
+      commit:   "33db620"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit f17f2e5db57f0380d7b08a39822b03eda290db2f[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:24 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch2
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch2"
+      merged:   "b5bd289"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch2.git"
+      branch:   "test"
+      commit:   "b5bd289"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit 54e8bcd972d72da81907ac98d456019372d817f6[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:36:17 2026 +0800
+
+    git subrepo push tg-rcore-tutorial-ch1
+    
+    subrepo:
+      subdir:   "tg-rcore-tutorial-ch1"
+      merged:   "b39b6b8"
+    upstream:
+      origin:   "git@github.com:rcore-os/tg-rcore-tutorial-ch1.git"
+      branch:   "test"
+      commit:   "b39b6b8"
+    git-subrepo:
+      version:  "0.4.9"
+      origin:   "https://github.com/ingydotnet/git-subrepo"
+      commit:   "5e0f401"
+
+[33mcommit c6cf10ec9c9a3a96d454628c2003cfeab8906c66[m[33m ([m[1;33mtag: [m[1;33mv0.4.8[m[33m)[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 18:34:35 2026 +0800
+
+    publish v0.4.8
+
+[33mcommit b589c934c368945f681ba33e76f5531e5a0db9d2[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 17:01:20 2026 +0800
+
+    chore(ch1): publish v0.4.7
+
+[33mcommit d1d1451b055c7310ce91276ae71af0371e2f8103[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 16:33:09 2026 +0800
+
+    update github ci test ch2~8
+
+[33mcommit 1d11d7870964a32085f42a36c18260eac25648be[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 16:25:43 2026 +0800
+
+    update github ci for test branch
+
+[33mcommit 17c33f45f969ecb6764761300a833ae24e376cce[m
+Author: chyyuu <yuchen@tsinghua.edu.cn>
+Date:   Wed Mar 11 16:23:56 2026 +0800
+
+    aadd g
