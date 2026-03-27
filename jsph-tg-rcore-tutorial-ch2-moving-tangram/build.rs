@@ -108,6 +108,8 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
         name,
         "--target",
         TARGET_ARCH,
+        "--features",
+        "tangram",
     ]);
 
     // Work around Rust 2024 unsafe_op_in_unsafe_fn lint in local tg-rcore-tutorial-syscall.
