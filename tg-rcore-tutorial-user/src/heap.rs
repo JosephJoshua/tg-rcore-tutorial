@@ -29,8 +29,8 @@ impl<T> StaticCell<T> {
 }
 
 pub fn init() {
-    // 托管空间 16 KiB
-    const MEMORY_SIZE: usize = 16 << 10;
+    // 托管空间 512 KiB (tangram pieces need up to ~210 KiB per bounding box)
+    const MEMORY_SIZE: usize = 512 << 10;
     static MEMORY: StaticCell<[u8; MEMORY_SIZE]> = StaticCell::new([0u8; MEMORY_SIZE]);
     unsafe {
         heap_mut().init(

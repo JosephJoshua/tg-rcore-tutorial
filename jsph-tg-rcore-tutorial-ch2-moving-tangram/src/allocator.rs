@@ -1,41 +1,34 @@
-//! Static bump allocator for VirtIO DMA and `extern crate alloc`.
+//! Bump allocator for VirtIO DMA and `extern crate alloc`.
 //!
-//! Allocate-only (never frees). Backed by a 5 MiB static array in BSS.
-//! Safe for single-core, one-shot init-then-display usage.
+//! Allocate-only (never frees). Uses a fixed region of RAM at 0x8100_0000
+//! to avoid overlapping with user programs loaded at 0x8040_0000.
+//! QEMU virt has 128 MiB RAM (0x8000_0000–0x87FF_FFFF), so this is safe.
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-/// 5 MiB pool — enough for 1024x768 BGRA framebuffer (~3 MiB) + VirtQueue + headroom.
+/// Fixed base address for the DMA/heap pool, placed at 16 MiB into RAM.
+/// This is well past the user program region (0x8040_0000) and the kernel
+/// BSS, avoiding the overlap that caused GPU hangs in the batch processing loop.
+const POOL_BASE: usize = 0x8100_0000;
+
+/// 5 MiB pool — enough for 1280x800 BGRA framebuffer (~4 MiB) + VirtQueue + headroom.
 const POOL_SIZE: usize = 5 * 1024 * 1024;
 
 /// Page size used by virtio-drivers for DMA allocations.
 const PAGE_SIZE: usize = 4096;
 
-#[repr(align(4096))]
-struct AlignedPool {
-    data: UnsafeCell<[u8; POOL_SIZE]>,
-}
-
-unsafe impl Sync for AlignedPool {}
-
-static POOL: AlignedPool = AlignedPool {
-    data: UnsafeCell::new([0u8; POOL_SIZE]),
-};
-
-/// Atomic offset into POOL.
+/// Atomic offset into the pool.
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// Bump-allocate `size` bytes with the given alignment from the static pool.
+/// Bump-allocate `size` bytes with the given alignment from the pool.
 /// Returns a pointer into the pool, or null if out of space.
 fn bump_alloc(size: usize, align: usize) -> *mut u8 {
     loop {
         let current = NEXT.load(Ordering::Relaxed);
-        let base = POOL.data.get() as usize;
-        let addr = base + current;
+        let addr = POOL_BASE + current;
         let aligned = (addr + align - 1) & !(align - 1);
-        let offset = aligned - base;
+        let offset = aligned - POOL_BASE;
         let new_offset = offset + size;
         if new_offset > POOL_SIZE {
             return core::ptr::null_mut();
@@ -70,7 +63,7 @@ static ALLOCATOR: BumpAllocator = BumpAllocator;
 
 use virtio_drivers::{Hal, PhysAddr, VirtAddr};
 
-/// VirtIO HAL for ch2-moving-tangram: identity-mapped, no paging, DMA from static pool.
+/// VirtIO HAL for ch2-moving-tangram: identity-mapped, no paging, DMA from fixed pool.
 pub struct HalImpl;
 
 impl Hal for HalImpl {
