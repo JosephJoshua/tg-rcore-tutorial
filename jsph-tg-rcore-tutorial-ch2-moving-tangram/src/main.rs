@@ -113,6 +113,14 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_io(&SyscallContext);
     tg_syscall::init_process(&SyscallContext);
 
+    // Verify kernel image doesn't overlap the DMA pool at 0x8100_0000
+    #[cfg(target_arch = "riscv64")]
+    {
+        unsafe extern "C" { static __end: u8; }
+        let kernel_end = unsafe { &raw const __end } as usize;
+        assert!(kernel_end < 0x8100_0000, "kernel image ({kernel_end:#x}) overlaps DMA pool");
+    }
+
     // Initialize VirtIO-GPU and fill white background
     #[cfg(target_arch = "riscv64")]
     {
@@ -267,6 +275,11 @@ fn handle_fb_info() -> usize {
 
 /// FB_WRITE syscall: copy user pixel data into framebuffer and flush.
 /// Args: a0=x, a1=y, a2=w, a3=h, a4=data_ptr
+///
+/// NOTE: `data_ptr` is not validated beyond bounds-checking the rectangle.
+/// In ch2 (no virtual memory, trusted batch programs), this is acceptable.
+/// A kernel with untrusted user programs would need to verify the pointer
+/// falls within the user address space.
 #[cfg(target_arch = "riscv64")]
 fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> usize {
     // SAFETY: single-threaded kernel; GPU/FRAMEBUFFER are set once before apps run.
@@ -276,7 +289,7 @@ fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> u
         (fb.ptr, fb.len, fb.width as usize, fb.height as usize)
     };
 
-    // Bounds check
+    // Bounds check (also prevents w*h*4 overflow since w <= fb_w and h <= fb_h)
     if x + w > fb_w || y + h > fb_h || w == 0 || h == 0 {
         return usize::MAX; // -1 as usize
     }
