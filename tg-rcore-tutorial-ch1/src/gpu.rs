@@ -8,7 +8,6 @@ use virtio_drivers::{MmioTransport, VirtIOGpu, VirtIOHeader};
 const VIRTIO0: usize = 0x10001000;
 
 /// Screen width and height (populated after GPU init).
-#[allow(dead_code)]
 pub struct Framebuffer {
     /// Raw pointer to the pixel buffer (BGRA format, 4 bytes per pixel).
     pub ptr: *mut u8,

@@ -37,6 +37,9 @@ mod allocator;
 #[cfg(target_arch = "riscv64")]
 mod gpu;
 
+#[cfg(target_arch = "riscv64")]
+mod tangram;
+
 /// S 态程序入口点。
 ///
 /// 这是一个裸函数（naked function），放置在 `.text.entry` 段，
@@ -78,26 +81,31 @@ extern "C" fn rust_main() -> ! {
 
     #[cfg(target_arch = "riscv64")]
     {
-        let (mut gpu, fb) = gpu::init();
-        // Fill screen red (BGRA: B=0, G=0, R=0xFF, A=0xFF)
-        let buf = unsafe { core::slice::from_raw_parts_mut(fb.ptr, fb.len) };
+        let (mut gpu, fb_info) = gpu::init();
+        let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
+
+        // Fill white background.
         for pixel in buf.chunks_exact_mut(4) {
-            pixel[0] = 0x00; // B
-            pixel[1] = 0x00; // G
-            pixel[2] = 0xFF; // R
-            pixel[3] = 0xFF; // A
+            pixel[0] = tangram::WHITE.b;
+            pixel[1] = tangram::WHITE.g;
+            pixel[2] = tangram::WHITE.r;
+            pixel[3] = tangram::WHITE.a;
         }
+
+        // Test triangle.
+        let triangle = [(200, 100), (400, 500), (100, 400)];
+        tangram::fill_polygon(buf, fb_info.width, fb_info.height, &triangle, tangram::COLORS[0]);
+
         gpu.flush().expect("flush failed");
 
         // Spin-wait ~3 seconds so the image is visible.
         // rdtime returns a cycle count; QEMU virt runs at 10 MHz.
         let start: usize;
         unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
-        let delay = 3 * 10_000_000; // 3 seconds at 10 MHz
         loop {
             let now: usize;
             unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
-            if now - start >= delay {
+            if now - start >= 3 * 10_000_000 {
                 break;
             }
         }
