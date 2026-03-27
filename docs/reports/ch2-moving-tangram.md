@@ -12,7 +12,8 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 **方案：低层帧缓冲区系统调用**
 - 内核初始化 GPU 并暴露两个自定义系统调用（ID 2000/2001）
 - 用户程序在用户空间完成多边形光栅化，通过系统调用将像素数据推送到内核帧缓冲区
-- 内核仅负责帧缓冲区的矩形写入和 GPU 刷新，不了解七巧板具体形状
+- 内核写入像素时跳过 alpha=0 的透明像素，允许重叠边界框的多边形正确叠加
+- 内核不了解七巧板具体形状，仅负责带透明的矩形像素块写入和 GPU 刷新
 
 ### 内核侧新增模块（jsph-tg-rcore-tutorial-ch2-moving-tangram/）
 
@@ -20,6 +21,7 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 - 使用 RAM 固定地址 0x8100_0000 处的 5 MiB 区域，避免与用户程序区域（0x8040_0000）重叠
 - 实现 `GlobalAlloc`（满足 `extern crate alloc`）和 `Hal` trait（VirtIO DMA 分配）
 - 恒等映射（ch2 无页表），仅分配不释放
+- 启动时断言 `__end < 0x8100_0000` 防止未来内核增长导致静默覆盖
 
 **gpu.rs — VirtIO-GPU 初始化**
 - 探测 QEMU virt 平台 8 个 MMIO 插槽（0x10001000–0x10008000）
@@ -27,10 +29,13 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 
 **main.rs 修改**
 - `rust_main` 中批处理循环前初始化 GPU，填充白色背景
-- GPU 驱动和帧缓冲区存储为 `static mut` 全局变量
+- GPU 驱动和帧缓冲区存储为 `static mut` 全局变量（通过 `&raw const`/`&raw mut` 访问）
 - `handle_syscall` 在标准分发前拦截自定义系统调用 ID
+- FB_WRITE 逐像素复制，跳过 alpha=0 透明像素（防止重叠边界框擦除先前渲染）
 - 设置 `scounteren.TM` 位，允许用户态访问 rdtime（用于动画计时）
 - 内核栈从 32 KiB 增大到 64 KiB（VirtIO-GPU 初始化需要）
+- 动画前等待按键（用户连接 QEMU VNC 后手动触发）
+- 动画后等待按键或 10 秒超时再关机
 
 ### 系统调用接口
 
@@ -39,13 +44,15 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 | FB_INFO | 2000 | 无 | `(width << 32) \| height`（RV64 打包） |
 | FB_WRITE | 2001 | a0=x, a1=y, a2=w, a3=h, a4=data_ptr | 0 成功，usize::MAX 失败 |
 
+FB_WRITE 行为：逐像素写入，跳过 alpha=0 的像素（透明），仅写入 alpha≠0 的像素。
+
 ### 用户侧修改（tg-rcore-tutorial-user/）
 
 **tangram.rs — 七巧板渲染模块（feature-gated）**
-- 7 种颜色定义（BGRA 格式）
+- 7 种颜色定义（BGRA 格式，alpha=0xFF 不透明）
 - 14 块七巧板几何定义（与 ch1-tangram 一致）
 - 整数扫描线多边形填充算法（i64 中间值防溢出）
-- `render_piece(idx)`: 计算边界框、堆分配像素缓冲区、光栅化、通过 FB_WRITE 推送
+- `render_piece(idx)`: 计算边界框、堆分配透明缓冲区（alpha=0）、光栅化不透明像素、通过 FB_WRITE 推送
 - `spin_wait_ms(ms)`: rdtime 自旋等待（QEMU virt 10 MHz 时钟）
 
 **lib.rs — 系统调用包装**
@@ -72,7 +79,7 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 
 ## 遇到的问题
 
-### 关键 bug：DMA 池与用户程序内存重叠
+### 关键 bug 1：DMA 池与用户程序内存重叠
 
 **症状**：第一个七巧板程序在 `render_piece()` 入口处挂起，无错误输出。
 
@@ -85,7 +92,17 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 4. 通过 `cargo clean` 强制完整重建
 5. `riscv64-linux-gnu-objdump -t` 查看符号表确认 POOL 地址在用户区域内
 
-**修复**：将分配器池从 BSS 静态数组改为使用 RAM 固定地址 0x8100_0000（16 MiB 偏移），完全避开用户程序区域。
+**修复**：将分配器池从 BSS 静态数组改为使用 RAM 固定地址 0x8100_0000（16 MiB 偏移），完全避开用户程序区域。添加启动断言验证内核镜像不超过此地址。
+
+### 关键 bug 2：重叠边界框擦除先前渲染的七巧板
+
+**症状**："O" 基本正确，但 "S" 形状完全错乱——各三角形散落，先渲染的被后渲染的覆盖为白色。
+
+**根因**：`render_piece` 将每块七巧板渲染到一个白色背景（alpha=0xFF）的局部缓冲区，再通过 FB_WRITE 写入帧缓冲区。当多块七巧板的边界框重叠时（S 的所有三角形共享大面积重叠区域），后写入的白色背景覆盖了先前渲染的彩色像素。
+
+**修复**：
+1. 用户侧：将局部缓冲区初始化为透明（全零，alpha=0）而非白色
+2. 内核侧：FB_WRITE 改为逐像素写入，跳过 alpha=0 的透明像素
 
 ### 其他问题
 
@@ -93,22 +110,26 @@ ch2 是批处理 OS：内核顺序加载嵌入的用户程序，逐个执行到�
 
 2. **Rust 2024 `static_mut_refs` lint**：内核的 `static mut GPU/FRAMEBUFFER` 不能直接用 `.as_ref()` 创建引用，需要通过 `&raw const`/`&raw mut` 裸指针间接访问。子代理在实现时自动处理。
 
-3. **Cargo 增量编译缓存**：修改用户程序源码后，内核二进制未更新。原因是 `global_asm!(include_str!(env!("APP_ASM")))` 引用的 `.incbin` 文件变更不会触发 Cargo 重新编译。需要 `cargo clean` 强制完整重建。
+3. **Rust 2024 `unnecessary unsafe` lint**：`&raw const` 对静态变量取裸指针在 Rust 2024 中不是 unsafe 操作，不需要 `unsafe {}` 块。
 
-4. **用户堆不足**：默认 16 KiB 堆无法分配七巧板像素缓冲区（最大 ~210 KiB），`vec!` 分配失败导致 panic 后 exit。增大到 512 KiB 解决。
+4. **Cargo 增量编译缓存**：修改用户程序源码后，内核二进制未更新。原因是 `global_asm!(include_str!(env!("APP_ASM")))` 引用的 `.incbin` 文件变更不会触发 Cargo 重新编译。需要 `cargo clean` 强制完整重建。
 
-5. **tangram 二进制 publish 兼容**：`cargo publish --dry-run` 编译所有 bin 目标，但 tangram 二进制依赖 `tangram` 特性下的模块。通过 `#[cfg(feature = "tangram")]` 门控 main 函数体解决。
+5. **用户堆不足**：默认 16 KiB 堆无法分配七巧板像素缓冲区（最大 ~210 KiB），`vec!` 分配失败导致 panic 后 exit。增大到 512 KiB 解决。
+
+6. **tangram 二进制 publish 兼容**：`cargo publish --dry-run` 编译所有 bin 目标，但 tangram 二进制依赖 `tangram` 特性下的模块。通过 `#[cfg(feature = "tangram")]` 门控 main 函数体解决。
+
+7. **QEMU VNC 连接时序**：动画启动后用户来不及连接 QEMU VNC 查看。在内核中添加 GPU 初始化后的按键等待（SBI console_getchar 轮询）。此交互逻辑放在内核中是因为 ch2 用户程序没有 SBI 控制台访问权限（内核未实现 read 系统调用）。
 
 ## 文件结构
 
 ```
-jsph-tg-rcore-tutorial-ch2-moving-tangram/
+tg-rcore-tutorial-ch2-moving-tangram/
 ├── Cargo.toml          # 独立发布配置，版本号依赖
 ├── .cargo/config.toml  # QEMU GPU 启动参数
 ├── build.rs            # --features tangram + RUSTFLAGS 绕过
 ├── test.sh             # 60 秒超时 + grep 验证
 └── src/
-    ├── main.rs         # GPU 初始化 + FB_INFO/FB_WRITE 系统调用
+    ├── main.rs         # GPU 初始化 + FB_INFO/FB_WRITE 系统调用 + 交互等待
     ├── allocator.rs    # 固定地址 bump 分配器 + VirtIO Hal
     └── gpu.rs          # VirtIO-GPU MMIO 探测和帧缓冲区
 
@@ -130,9 +151,7 @@ tg-rcore-tutorial-user/  (修改)
 1. **brainstorming** → 设计规格文档（`docs/superpowers/specs/2026-03-27-ch2-moving-tangram-design.md`）
 2. **writing-plans** → 实现计划（`docs/superpowers/plans/2026-03-27-ch2-moving-tangram.md`），8 个任务
 3. **subagent-driven-development** → 每个任务分派独立子代理实现
-4. 验证阶段发现并修复 DMA 池重叠 bug
-
-共产生 12 个提交。
+4. 验证阶段发现并修复 DMA 池重叠 bug 和透明度 bug
 
 ## 测试结果
 
@@ -140,8 +159,9 @@ tg-rcore-tutorial-user/  (修改)
 - `cargo check`（内核 crate）：通过
 - `cargo publish --dry-run`（内核 crate）：通过
 - `cargo publish --dry-run`（用户 crate）：通过
-- `cargo run`：8 个原有 ch2 测试正常 + 14 块七巧板逐帧渲染 + 正常关机
+- `cargo run`（VNC 查看）：8 个原有 ch2 测试正常 + 14 块七巧板逐帧渲染组成 "OS" 图案
 - 所有 14 块七巧板均成功渲染并 exit code 0
+- 动画前按键等待 + 动画后 10 秒超时/按键关机
 
 ## 设计决策说明
 
@@ -149,8 +169,12 @@ tg-rcore-tutorial-user/  (修改)
 
 2. **用户空间光栅化 vs 内核光栅化**：选择在用户空间完成多边形光栅化，内核仅负责矩形像素块写入。这使内核不了解七巧板具体形状，更通用。
 
-3. **固定地址分配器 vs BSS 静态数组**：从 BSS 静态数组改为 RAM 固定地址 0x81000000，消除与用户程序的地址空间冲突。QEMU virt 128 MiB RAM 保证此地址可用。
+3. **透明像素跳过**：FB_WRITE 逐像素写入而非 memcpy 整行，跳过 alpha=0 像素。这允许用户程序发送带透明背景的边界框而不擦除先前渲染的内容，解决了重叠七巧板的覆盖问题。性能代价可接受（每帧仅一块小多边形）。
 
-4. **rdtime 自旋等待 vs sleep 系统调用**：ch2 内核不实现 clock_gettime/sched_yield 系统调用，因此不能使用用户库的 `sleep()` 函数。改为直接在用户空间使用 rdtime 自旋等待，内核通过设置 `scounteren.TM` 位允许 U-mode 访问。
+4. **固定地址分配器 vs BSS 静态数组**：从 BSS 静态数组改为 RAM 固定地址 0x81000000，消除与用户程序的地址空间冲突。QEMU virt 128 MiB RAM 保证此地址可用。
 
-5. **堆大小 512 KiB**：最大七巧板（S1）像素缓冲区约 210 KiB，加上 buddy allocator 开销和对齐，512 KiB 提供充足余量。对 ch3+（step ≥ 2 MiB）和 ch4+（虚拟内存）无影响。
+5. **rdtime 自旋等待 vs sleep 系统调用**：ch2 内核不实现 clock_gettime/sched_yield 系统调用，因此不能使用用户库的 `sleep()` 函数。改为直接在用户空间使用 rdtime 自旋等待，内核通过设置 `scounteren.TM` 位允许 U-mode 访问。
+
+6. **内核中的交互等待**：动画前按键等待和动画后超时/按键关机逻辑放在内核中，因为 ch2 用户程序没有 SBI 控制台读取权限。这是教学 OS 的务实选择。
+
+7. **堆大小 512 KiB**：最大七巧板（S1）像素缓冲区约 210 KiB，加上 buddy allocator 开销和对齐，512 KiB 提供充足余量。对 ch3+（step ≥ 2 MiB）和 ch4+（虚拟内存）无影响。

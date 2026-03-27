@@ -117,7 +117,7 @@ extern "C" fn rust_main() -> ! {
     #[cfg(target_arch = "riscv64")]
     {
         unsafe extern "C" { static __end: u8; }
-        let kernel_end = unsafe { &raw const __end } as usize;
+        let kernel_end = (&raw const __end) as usize;
         assert!(kernel_end < 0x8100_0000, "kernel image ({kernel_end:#x}) overlaps DMA pool");
     }
 
@@ -144,6 +144,12 @@ extern "C" fn rust_main() -> ! {
 
         // Enable rdtime in U-mode for user-space spin-wait timing
         unsafe { core::arch::asm!("csrs scounteren, {}", in(reg) (1 << 1)) };
+
+        // Interactive wait: let the user connect to QEMU's VNC before the animation starts.
+        // This lives in the kernel because ch2 user programs have no SBI console access
+        // (the kernel doesn't implement the `read` syscall). Pragmatic for a demo.
+        println!("GPU ready — connect to QEMU VNC, then press any key to start animation...");
+        while tg_sbi::console_getchar() == usize::MAX {}
     }
 
     // 第四步：批处理——依次加载并运行每个用户程序
@@ -198,7 +204,25 @@ extern "C" fn rust_main() -> ! {
         println!();
     }
 
-    // 所有用户程序执行完毕，关机
+    // Wait for keypress or 10-second timeout before shutdown.
+    #[cfg(target_arch = "riscv64")]
+    {
+        println!("All done — press any key or wait 10 seconds to shut down.");
+        let timeout = 10 * 10_000_000; // 10 seconds at 10 MHz
+        let start: usize;
+        unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
+        loop {
+            if tg_sbi::console_getchar() != usize::MAX {
+                break;
+            }
+            let now: usize;
+            unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
+            if now - start >= timeout {
+                break;
+            }
+        }
+    }
+
     tg_sbi::shutdown(false)
 }
 
@@ -297,12 +321,21 @@ fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> u
     let fb_buf = unsafe { core::slice::from_raw_parts_mut(fb_ptr, fb_len) };
     let user_data = unsafe { core::slice::from_raw_parts(data_ptr as *const u8, w * h * 4) };
 
-    // Copy row-by-row into framebuffer
+    // Copy pixels into framebuffer, skipping transparent (alpha=0) pixels.
+    // This allows overlapping bounding boxes without erasing earlier pieces.
     for row in 0..h {
-        let fb_offset = ((y + row) * fb_w + x) * 4;
-        let src_offset = row * w * 4;
-        fb_buf[fb_offset..fb_offset + w * 4]
-            .copy_from_slice(&user_data[src_offset..src_offset + w * 4]);
+        for col in 0..w {
+            let src_off = (row * w + col) * 4;
+            let alpha = user_data[src_off + 3];
+            if alpha == 0 {
+                continue;
+            }
+            let fb_off = ((y + row) * fb_w + (x + col)) * 4;
+            fb_buf[fb_off] = user_data[src_off];
+            fb_buf[fb_off + 1] = user_data[src_off + 1];
+            fb_buf[fb_off + 2] = user_data[src_off + 2];
+            fb_buf[fb_off + 3] = user_data[src_off + 3];
+        }
     }
 
     // Flush display

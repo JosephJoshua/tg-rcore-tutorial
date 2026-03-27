@@ -189,9 +189,12 @@ pub fn render_piece(piece_idx: usize) {
     let bbox_w = (max_x - min_x + 1) as usize;
     let bbox_h = (max_y - min_y + 1) as usize;
 
-    // Allocate local buffer, filled with white (BGRA 0xFF)
+    // Allocate local buffer, filled with transparent (alpha=0).
+    // The kernel's FB_WRITE skips transparent pixels, so only the polygon's
+    // colored pixels (alpha=0xFF) are written. This prevents overlapping
+    // bounding boxes from erasing previously drawn pieces with white.
     let buf_size = bbox_w * bbox_h * 4;
-    let mut buf = vec![0xFFu8; buf_size];
+    let mut buf = vec![0u8; buf_size];
 
     // Offset vertices to local buffer coordinates
     let mut local_verts = [(0i32, 0i32); 8];
