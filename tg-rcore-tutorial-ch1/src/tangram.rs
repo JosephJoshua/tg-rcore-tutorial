@@ -38,7 +38,6 @@ pub const COLORS: [Color; 7] = [
 pub const WHITE: Color = Color::new(0xFF, 0xFF, 0xFF);
 
 /// A tangram piece: a polygon (vertices) + color index.
-#[allow(dead_code)]
 pub struct Piece {
     /// Polygon vertices as (x, y) coordinate pairs.
     pub vertices: &'static [(i32, i32)],
@@ -147,39 +146,24 @@ pub fn fill_polygon(fb: &mut [u8], width: u32, height: u32, vertices: &[(i32, i3
 }
 
 // ---- Tangram "O" pieces ----
-#[allow(dead_code)]
 const O_TRI_L1: [(i32, i32); 3] = [(140, 144), (140, 624), (300, 384)];
-#[allow(dead_code)]
 const O_TRI_L2: [(i32, i32); 3] = [(140, 144), (460, 144), (300, 384)];
-#[allow(dead_code)]
 const O_TRI_M: [(i32, i32); 3] = [(460, 144), (460, 304), (300, 384)];
-#[allow(dead_code)]
 const O_TRI_R: [(i32, i32); 3] = [(460, 304), (460, 624), (300, 384)];
-#[allow(dead_code)]
 const O_TRI_S1: [(i32, i32); 3] = [(460, 624), (300, 624), (300, 384)];
-#[allow(dead_code)]
 const O_TRI_S2: [(i32, i32); 3] = [(300, 624), (140, 624), (300, 384)];
-#[allow(dead_code)]
 const O_PARA: [(i32, i32); 4] = [(220, 504), (300, 384), (380, 504), (300, 624)];
 
 // ---- Tangram "S" pieces ----
-#[allow(dead_code)]
 const S_TRI_L1: [(i32, i32); 3] = [(540, 144), (860, 144), (540, 464)];
-#[allow(dead_code)]
 const S_TRI_L2: [(i32, i32); 3] = [(860, 144), (860, 464), (540, 464)];
-#[allow(dead_code)]
 const S_TRI_M: [(i32, i32); 3] = [(860, 464), (700, 464), (700, 304)];
-#[allow(dead_code)]
 const S_TRI_R: [(i32, i32); 3] = [(540, 464), (860, 464), (860, 624)];
-#[allow(dead_code)]
 const S_TRI_S1: [(i32, i32); 3] = [(540, 464), (540, 624), (700, 624)];
-#[allow(dead_code)]
 const S_TRI_S2: [(i32, i32); 3] = [(700, 624), (860, 624), (860, 464)];
-#[allow(dead_code)]
 const S_PARA: [(i32, i32); 4] = [(540, 464), (700, 304), (700, 464), (540, 624)];
 
 /// All 14 tangram pieces for the "OS" display.
-#[allow(dead_code)]
 pub static PIECES: [Piece; 14] = [
     Piece { vertices: &O_TRI_L1, color_idx: 0 },
     Piece { vertices: &O_TRI_L2, color_idx: 1 },

@@ -70,10 +70,7 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-/// S 态主函数：打印 "Hello, world!" 并关机。
-///
-/// 通过 SBI 的 `console_putchar` 逐字节输出字符串，
-/// 然后调用 `shutdown` 正常关机退出 QEMU。
+/// S 态主函数：打印 "Hello, world!"，显示 tangram "OS" 图案，然后关机。
 extern "C" fn rust_main() -> ! {
     for c in b"Hello, world!\n" {
         console_putchar(*c);
@@ -92,14 +89,16 @@ extern "C" fn rust_main() -> ! {
             pixel[3] = tangram::WHITE.a;
         }
 
-        // Test triangle.
-        let triangle = [(200, 100), (400, 500), (100, 400)];
-        tangram::fill_polygon(buf, fb_info.width, fb_info.height, &triangle, tangram::COLORS[0]);
+        // Draw all tangram pieces.
+        for piece in &tangram::PIECES {
+            let color = tangram::COLORS[piece.color_idx];
+            tangram::fill_polygon(buf, fb_info.width, fb_info.height, piece.vertices, color);
+        }
 
         gpu.flush().expect("flush failed");
 
-        // Spin-wait ~3 seconds so the image is visible.
-        // rdtime returns a cycle count; QEMU virt runs at 10 MHz.
+        // Wait ~3 seconds so the image is visible before shutdown.
+        // QEMU virt timer runs at 10 MHz.
         let start: usize;
         unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
         loop {
@@ -111,7 +110,7 @@ extern "C" fn rust_main() -> ! {
         }
     }
 
-    shutdown(false) // false 表示正常关机
+    shutdown(false)
 }
 
 /// panic 处理函数。
