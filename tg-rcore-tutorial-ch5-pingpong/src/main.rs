@@ -39,10 +39,14 @@
 // 在非 RISC-V 架构上允许未使用的代码（用于 IDE 开发体验）
 #![cfg_attr(not(target_arch = "riscv64"), allow(dead_code, unused_imports))]
 
+/// DMA bump allocator for VirtIO devices
+mod allocator;
 /// 进程模块：定义 Process 结构体及其方法（from_elf、fork、exec 等）
 mod process;
 /// 处理器模块：定义 PROCESSOR 全局变量和进程管理器 ProcManager
 mod processor;
+/// VirtIO GPU and keyboard device drivers
+mod virtio;
 
 #[macro_use]
 extern crate tg_console;
@@ -122,8 +126,8 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-/// 物理内存容量 = 48 MiB
-const MEMORY: usize = 48 << 20;
+/// 物理内存容量 = 70 MiB (increased for VirtIO GPU DMA pool)
+const MEMORY: usize = 70 << 20;
 
 /// 异界传送门所在虚页（虚拟地址空间最高页）
 ///
@@ -161,6 +165,25 @@ impl KernelSpace {
 
 /// 内核地址空间全局实例
 static KERNEL_SPACE: KernelSpace = KernelSpace::new();
+
+/// Custom syscall IDs for framebuffer operations.
+const SYSCALL_FB_INFO: usize = 2000;
+/// Write pixels to framebuffer.
+const SYSCALL_FB_WRITE: usize = 2001;
+/// Create shared memory page.
+const SYSCALL_SHM_CREATE: usize = 2002;
+
+/// Global GPU driver.
+#[cfg(target_arch = "riscv64")]
+static mut GPU: Option<virtio_drivers::VirtIOGpu<'static, crate::allocator::HalImpl, virtio_drivers::MmioTransport>> = None;
+
+/// Global framebuffer info.
+#[cfg(target_arch = "riscv64")]
+static mut FRAMEBUFFER: Option<crate::virtio::Framebuffer> = None;
+
+/// Global keyboard driver.
+#[cfg(target_arch = "riscv64")]
+static mut KEYBOARD: Option<virtio_drivers::VirtIOInput<crate::allocator::HalImpl, virtio_drivers::MmioTransport>> = None;
 
 /// 应用程序名称到 ELF 数据的映射表
 ///
@@ -226,6 +249,17 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_scheduling(&SyscallContext);
     tg_syscall::init_clock(&SyscallContext);
     tg_syscall::init_memory(&SyscallContext);
+    // Initialize VirtIO GPU and keyboard
+    #[cfg(target_arch = "riscv64")]
+    {
+        let devices = virtio::init();
+        let (gpu_driver, fb_info) = devices.gpu;
+        unsafe {
+            GPU = Some(gpu_driver);
+            FRAMEBUFFER = Some(fb_info);
+            KEYBOARD = devices.keyboard;
+        }
+    }
     // 步骤 8：加载初始进程 initproc
     // initproc 是所有用户进程的祖先，它会 fork 出 shell 进程
     let initproc_data = APPS.get("initproc").unwrap();
@@ -251,25 +285,45 @@ extern "C" fn rust_main() -> ! {
                 scause::Trap::Exception(scause::Exception::UserEnvCall) => {
                     use tg_syscall::{SyscallId as Id, SyscallResult as Ret};
                     let ctx = &mut task.context.context;
-                    // 将 sepc 向前移动 4 字节，使返回用户态时跳过 ecall 指令
                     ctx.move_next();
-                    // 解析系统调用号和参数
                     let id: Id = ctx.a(7).into();
                     let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
-                    // 分发并处理系统调用
+
+                    // Handle custom syscalls before standard dispatch
+                    let id_num = ctx.a(7);
+                    #[cfg(target_arch = "riscv64")]
+                    match id_num {
+                        SYSCALL_FB_INFO => {
+                            let ret = handle_fb_info();
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_FB_WRITE => {
+                            let ret = handle_fb_write(args[0], args[1], args[2], args[3], args[4]);
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_SHM_CREATE => {
+                            let ret = handle_shm_create();
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        _ => {}
+                    }
+
                     match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
                         Ret::Done(ret) => match id {
-                            // exit 系统调用：标记当前进程为已退出
                             Id::EXIT => unsafe { (*processor).make_current_exited(ret) },
                             _ => {
-                                // 其他系统调用：将返回值写入 a0 寄存器，暂停当前进程
                                 let ctx = &mut task.context.context;
                                 *ctx.a_mut(0) = ret as _;
                                 unsafe { (*processor).make_current_suspend() };
                             }
                         },
                         Ret::Unsupported(_) => {
-                            // 不支持的系统调用：终止进程
                             log::info!("id = {id:?}");
                             unsafe { (*processor).make_current_exited(-2) };
                         }
@@ -336,6 +390,14 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
         PPN::new(s.floor().val()),
         build_flags("_WRV"),
     );
+    // Map VirtIO MMIO region — identity-mapped, R+W
+    let mmio_start = VAddr::<Sv39>::new(0x1000_0000);
+    let mmio_end = VAddr::<Sv39>::new(0x1000_9000);
+    space.map_extern(
+        mmio_start.floor()..mmio_end.ceil(),
+        PPN::new(mmio_start.floor().val()),
+        build_flags("_WRV"),
+    );
     // 映射异界传送门页面到虚拟地址空间最高页
     // 标志位 __G_XWRV：全局、可执行、可写、可读、有效
     space.map_extern(
@@ -357,6 +419,102 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
 fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
     let portal_idx = PROTAL_TRANSIT.index_in(Sv39::MAX_LEVEL);
     space.root()[portal_idx] = unsafe { KERNEL_SPACE.assume_init_ref() }.root()[portal_idx];
+}
+
+/// FB_INFO: returns (width << 32) | height.
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_info() -> usize {
+    let (width, height) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.width, fb.height)
+    };
+    ((width as usize) << 32) | (height as usize)
+}
+
+/// FB_WRITE: copy BGRA pixels from user buffer into framebuffer and flush.
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> usize {
+    let (fb_ptr, fb_len, fb_w, fb_h) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.ptr, fb.len, fb.width as usize, fb.height as usize)
+    };
+
+    if x + w > fb_w || y + h > fb_h || w == 0 || h == 0 {
+        return usize::MAX;
+    }
+
+    let fb_buf = unsafe { core::slice::from_raw_parts_mut(fb_ptr, fb_len) };
+
+    const READABLE: VmFlags<Sv39> = build_flags("RV");
+    let process = PROCESSOR.get_mut().current().unwrap();
+
+    for row in 0..h {
+        let row_va = data_ptr + row * w * 4;
+        if let Some(ptr) = process
+            .address_space
+            .translate::<u8>(VAddr::new(row_va), READABLE)
+        {
+            let user_row = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), w * 4) };
+            for col in 0..w {
+                let src_off = col * 4;
+                let alpha = user_row[src_off + 3];
+                if alpha == 0 {
+                    continue;
+                }
+                let fb_off = ((y + row) * fb_w + (x + col)) * 4;
+                fb_buf[fb_off] = user_row[src_off];
+                fb_buf[fb_off + 1] = user_row[src_off + 1];
+                fb_buf[fb_off + 2] = user_row[src_off + 2];
+                fb_buf[fb_off + 3] = user_row[src_off + 3];
+            }
+        } else {
+            return usize::MAX;
+        }
+    }
+
+    let gpu = unsafe {
+        let p = &raw mut GPU;
+        (*p).as_mut().expect("GPU not initialized")
+    };
+    gpu.flush().expect("GPU flush failed");
+
+    0
+}
+
+/// SHM_CREATE: allocate a physical page and map it at 0x3000_0000 in the current process.
+#[cfg(target_arch = "riscv64")]
+fn handle_shm_create() -> usize {
+    const SHARED_MEM_VA: usize = 0x3000_0000;
+    const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+
+    let process = PROCESSOR.get_mut().current().unwrap();
+
+    if process.shared_page.is_some() {
+        return SHARED_MEM_VA;
+    }
+
+    let page_ptr = unsafe {
+        alloc::alloc::alloc_zeroed(core::alloc::Layout::from_size_align_unchecked(
+            PAGE_SIZE,
+            PAGE_SIZE,
+        ))
+    };
+    if page_ptr.is_null() {
+        return usize::MAX;
+    }
+
+    let ppn = PPN::new(page_ptr as usize >> Sv39::PAGE_BITS);
+
+    process.address_space.map_extern(
+        VAddr::new(SHARED_MEM_VA).floor()..VAddr::new(SHARED_MEM_VA + PAGE_SIZE).ceil(),
+        ppn,
+        build_flags("U_WRV"),
+    );
+    process.shared_page = Some(ppn);
+
+    SHARED_MEM_VA
 }
 
 /// 各种接口库的实现
@@ -513,12 +671,12 @@ mod impls {
             }
         }
 
-        /// read 系统调用：从标准输入读取数据
+        /// read 系统调用：非阻塞 VirtIO 键盘输入
         ///
-        /// 通过 SBI console_getchar 接口逐字符读取，
-        /// 同样需要地址翻译和可写权限检查。
+        /// Poll VirtIO keyboard for key press events.
+        /// Returns 1 if a key was read, 0 if no key available.
         #[inline]
-        fn read(&self, _caller: Caller, fd: usize, buf: usize, count: usize) -> isize {
+        fn read(&self, _caller: Caller, fd: usize, buf: usize, _count: usize) -> isize {
             if fd == STDIN {
                 const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
                 if let Some(mut ptr) = PROCESSOR
@@ -528,15 +686,28 @@ mod impls {
                     .address_space
                     .translate::<u8>(VAddr::new(buf), WRITEABLE)
                 {
-                    let mut ptr = unsafe { ptr.as_mut() } as *mut u8;
-                    for _ in 0..count {
-                        let c = tg_sbi::console_getchar() as u8;
-                        unsafe {
-                            *ptr = c;
-                            ptr = ptr.add(1);
+                    #[cfg(target_arch = "riscv64")]
+                    {
+                        let keyboard = unsafe {
+                            let p = &raw mut crate::KEYBOARD;
+                            (*p).as_mut()
+                        };
+                        if let Some(kbd) = keyboard {
+                            if let Some(event) = kbd.pop_pending_event() {
+                                if event.event_type == 1 && event.value == 1 {
+                                    let keycode = event.code as u8;
+                                    unsafe { *ptr.as_mut() = keycode };
+                                    return 1;
+                                }
+                            }
                         }
+                        return 0;
                     }
-                    count as _
+                    #[cfg(not(target_arch = "riscv64"))]
+                    {
+                        let _ = ptr;
+                        return 0;
+                    }
                 } else {
                     log::error!("ptr not writeable");
                     -1

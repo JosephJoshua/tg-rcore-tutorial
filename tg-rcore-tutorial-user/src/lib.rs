@@ -23,6 +23,9 @@ pub mod snake;
 #[cfg(feature = "tetris")]
 pub mod tetris;
 
+#[cfg(feature = "pingpong")]
+pub mod pingpong;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {
@@ -52,6 +55,20 @@ pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
             in("a2") w as usize,
             in("a3") h as usize,
             in("a4") data as usize,
+        );
+    }
+    ret
+}
+
+/// Request a shared memory page from the kernel.
+/// Returns the virtual address of the shared page, or usize::MAX on failure.
+pub fn shm_create() -> usize {
+    let ret: usize;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2002usize,
+            lateout("a0") ret,
         );
     }
     ret

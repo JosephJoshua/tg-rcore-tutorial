@@ -54,6 +54,8 @@ pub struct Process {
     pub stride: usize,
     /// stride 调度算法：进程优先级
     pub priority: usize,
+    /// Shared memory page: physical page number shared between parent and child after fork
+    pub shared_page: Option<PPN<Sv39>>,
 }
 
 impl Process {
@@ -74,17 +76,31 @@ impl Process {
     /// 深拷贝父进程的地址空间（包括所有映射的物理页面），
     /// 子进程获得独立的 PID 和地址空间，但初始上下文与父进程相同。
     pub fn fork(&mut self) -> Option<Process> {
-        // 分配新的 PID
         let pid = ProcId::new();
-        // 复制父进程的完整地址空间（深拷贝所有页表和物理页面数据）
         let parent_addr_space = &self.address_space;
         let mut address_space: AddressSpace<Sv39, Sv39Manager> = AddressSpace::new();
         parent_addr_space.cloneself(&mut address_space);
-        // 在子进程地址空间中映射异界传送门
         map_portal(&address_space);
-        // 复制父进程的用户态上下文（通用寄存器状态）
+
+        // If parent has a shared memory page, remap it in child to the SAME physical page
+        // (cloneself deep-copied it — undo the copy and map the original)
+        let shared_page = if let Some(ppn) = self.shared_page {
+            const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+            const SHARED_MEM_VA: usize = 0x3000_0000;
+            address_space.unmap(
+                VAddr::new(SHARED_MEM_VA).floor()..VAddr::new(SHARED_MEM_VA + PAGE_SIZE).ceil(),
+            );
+            address_space.map_extern(
+                VAddr::new(SHARED_MEM_VA).floor()..VAddr::new(SHARED_MEM_VA + PAGE_SIZE).ceil(),
+                ppn,
+                build_flags("U_WRV"),
+            );
+            Some(ppn)
+        } else {
+            None
+        };
+
         let context = self.context.context.clone();
-        // 构建子进程的 satp 值（Mode=Sv39 | 根页表物理页号）
         let satp = (8 << 60) | address_space.root_ppn().val();
         let foreign_ctx = ForeignContext { context, satp };
         Some(Self {
@@ -95,6 +111,7 @@ impl Process {
             program_brk: self.program_brk,
             stride: 0,
             priority: 16,
+            shared_page,
         })
     }
 
@@ -200,6 +217,7 @@ impl Process {
             program_brk: heap_bottom,
             stride: 0,
             priority: 16,
+            shared_page: None,
         })
     }
 
