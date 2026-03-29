@@ -11,7 +11,9 @@ if ! command -v tg-rcore-tutorial-checker &> /dev/null; then
     cargo install tg-rcore-tutorial-checker
 fi
 
-echo -e "${YELLOW}Building ch5-pingpong kernel...${NC}"
+echo -e "${YELLOW}Building ch5-pingpong kernel (test mode)...${NC}"
+cargo clean
+export CHAPTER=-5
 cargo build
 
 KERNEL="target/riscv64gc-unknown-none-elf/debug/jsph-tg-rcore-tutorial-ch5-pingpong"
