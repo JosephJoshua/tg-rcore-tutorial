@@ -180,12 +180,12 @@ extern "C" fn rust_main() -> ! {
         let (mut gpu_driver, fb_info) = devices.gpu;
         let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
 
-        // Fill with snake game background color (#1A1A2E BGRA)
+        // Fill with snake game background color (#0D0D1A BGRA)
         // so the user-side doesn't need to do an expensive full-screen fill
         for i in (0..buf.len()).step_by(4) {
-            buf[i] = 0x2E;     // B
-            buf[i + 1] = 0x1A; // G
-            buf[i + 2] = 0x1A; // R
+            buf[i] = 0x1A;     // B
+            buf[i + 1] = 0x0D; // G
+            buf[i + 2] = 0x0D; // R
             buf[i + 3] = 0xFF; // A
         }
 
