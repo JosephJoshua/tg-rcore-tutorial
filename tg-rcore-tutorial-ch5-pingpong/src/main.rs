@@ -173,6 +173,9 @@ const SYSCALL_FB_WRITE: usize = 2001;
 /// Create shared memory page.
 const SYSCALL_SHM_CREATE: usize = 2002;
 
+/// Fixed virtual address for the shared memory page.
+const SHARED_MEM_VA: usize = 0x3000_0000;
+
 /// Global GPU driver.
 #[cfg(target_arch = "riscv64")]
 static mut GPU: Option<virtio_drivers::VirtIOGpu<'static, crate::allocator::HalImpl, virtio_drivers::MmioTransport>> = None;
@@ -494,7 +497,6 @@ fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> u
 /// SHM_CREATE: allocate a physical page and map it at 0x3000_0000 in the current process.
 #[cfg(target_arch = "riscv64")]
 fn handle_shm_create() -> usize {
-    const SHARED_MEM_VA: usize = 0x3000_0000;
     const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
 
     let process = PROCESSOR.get_mut().current().unwrap();
@@ -727,9 +729,8 @@ mod impls {
                             };
                             if let Some(kbd) = keyboard {
                                 if let Some(event) = kbd.pop_pending_event() {
-                                    if event.event_type == 1 && event.value == 1 {
-                                        let keycode = event.code as u8;
-                                        unsafe { *ptr.as_mut() = keycode };
+                                    if event.event_type == 1 && event.value == 1 && event.code < 256 {
+                                        unsafe { *ptr.as_mut() = event.code as u8 };
                                         return 1;
                                     }
                                 }

@@ -77,7 +77,7 @@ fn fill_rect(x: i32, y: i32, w: i32, h: i32, color: [u8; 4]) {
     if w <= 0 || h <= 0 {
         return;
     }
-    const TILE: i32 = 32;
+    const TILE: i32 = 16;
     let mut buf = [0u8; (TILE * TILE * 4) as usize];
 
     let mut ty = 0;
@@ -333,7 +333,7 @@ fn update_physics(state: &mut SharedState, rng: &mut Rng) {
         let offset = hit_pos - PADDLE_HEIGHT / 2;
         state.ball_vy = offset * 4;
         if state.ball_vx.abs() < BALL_SPEED_CAP {
-            state.ball_vx = state.ball_vx - state.ball_vx.signum() * 32;
+            state.ball_vx = state.ball_vx + state.ball_vx.signum() * 32;
         }
     }
 

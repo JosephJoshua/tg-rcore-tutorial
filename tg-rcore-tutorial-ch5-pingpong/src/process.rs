@@ -86,7 +86,7 @@ impl Process {
         // (cloneself deep-copied it — undo the copy and map the original)
         let shared_page = if let Some(ppn) = self.shared_page {
             const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
-            const SHARED_MEM_VA: usize = 0x3000_0000;
+            use crate::SHARED_MEM_VA;
             address_space.unmap(
                 VAddr::new(SHARED_MEM_VA).floor()..VAddr::new(SHARED_MEM_VA + PAGE_SIZE).ceil(),
             );
