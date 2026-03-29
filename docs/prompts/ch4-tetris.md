@@ -64,10 +64,7 @@ Ch4 is a **major architectural jump** from ch3. Understanding these differences 
    - Translate keycodes to game-meaningful bytes (see keycode table below)
    - **Do NOT use `tg_sbi::console_getchar()`** — it blocks in M-mode (busy-waits in a loop until a character arrives). This was a critical bug in ch3-snake development.
 
-4. **Non-blocking IO::read** — Implement `IO::read` for:
-   - fd=0 (STDIN): Poll VirtIO keyboard directly, return 0 if no key
-   - fd=3 (STDIN_BUFFERED): Read from kernel ring buffer filled by timer interrupt
-   - **Translate the user buffer pointer** before writing to it
+4. **Non-blocking IO::read** — Implement `IO::read` for fd=0 (STDIN): poll VirtIO keyboard directly, return 0 if no key. **Translate the user buffer pointer** before writing to it.
 
 5. **Kernel stack size** — Ch4 already has a larger kernel setup. Ensure the stack is large enough for VirtIO init + page table operations.
 
@@ -77,7 +74,7 @@ Ch4 is a **major architectural jump** from ch3. Understanding these differences 
 
 1. **Tetris game module** (`tg-rcore-tutorial-user/src/tetris.rs`, feature-gated with `tetris`) — Implements all game logic, rendering, and input handling.
 
-2. **Two binaries** (`tetris_poll.rs`, `tetris_interrupt.rs`) — Thin wrappers passing different fd to the game loop, demonstrating polling vs interrupt-buffered input. **Gate the binary body with `#[cfg(feature = "tetris")]`** so `cargo publish --dry-run` passes without the feature.
+2. **One binary** (`tetris.rs`) — Calls `tetris::run_game()`. **Gate the binary body with `#[cfg(feature = "tetris")]`** so `cargo publish --dry-run` passes without the feature.
 
 3. **Rendering via `fb_write`** — Same `fb_info()`/`fb_write()` wrappers in `lib.rs` as ch3. These use inline asm ecall with IDs 2000/2001.
 
@@ -121,7 +118,7 @@ Each piece: array of 4 (row, col) offsets relative to a pivot. Store all 4 rotat
 
 ### Rendering approach
 - **Incremental rendering**: Only redraw cells that changed (placed piece, cleared lines, new falling piece position). Avoid full-board redraws — each `fb_write` triggers a GPU flush.
-- **Ghost piece** (optional): Show where the piece would land as a dim outline.
+- **Ghost piece**: Show where the piece would land as a dim outline.
 - **Use a static render buffer** (32×32×4 bytes) for cell drawing to avoid heap allocation on the hot path.
 - **Background fill in user space** — the kernel should NOT fill the screen with game-specific colors. Draw background via fb_write strips in the game's init function.
 
@@ -185,11 +182,10 @@ if let Some(kernel_ptr) = process.address_space.translate::<u8>(
 | `ch4-tetris/build.rs` | Modify | Tetris case_key selection, `--features tetris`, rerun triggers |
 | `ch4-tetris/test.sh` | Modify | Headless CI with timeout + GPU device |
 | `user/src/tetris.rs` | Create | Game logic, rendering, input (feature-gated) |
-| `user/src/lib.rs` | Modify | Add tetris module, STDIN_BUFFERED const (if not already present from ch3-snake) |
+| `user/src/lib.rs` | Modify | Add tetris module |
 | `user/Cargo.toml` | Modify | Add `tetris` feature |
-| `user/src/bin/tetris_poll.rs` | Create | Polling input variant |
-| `user/src/bin/tetris_interrupt.rs` | Create | Interrupt-buffered variant |
-| `user/cases.toml` | Modify | Add ch4_tetris_poll, ch4_tetris_interrupt sections |
+| `user/src/bin/tetris.rs` | Create | Tetris binary (feature-gated body) |
+| `user/cases.toml` | Modify | Add ch4_tetris section |
 
 ## Acceptance Criteria
 
@@ -198,10 +194,9 @@ if let Some(kernel_ptr) = process.address_space.translate::<u8>(
 3. Pieces fall with gravity, lines clear, score/level increase
 4. Speed increases with level (starts ~800ms, gets faster)
 5. Game over when pieces stack to the top, any key restarts
-6. Polling mode (default) and interrupt mode (`--features interrupt`) both work
-7. Existing ch4 test programs still pass (serial output correct)
-8. `cargo check` and `cargo publish --dry-run` pass
-9. Score, level, and lines displayed on screen
+6. Existing ch4 test programs still pass (serial output correct)
+7. `cargo check` and `cargo publish --dry-run` pass
+8. Score, level, and lines displayed on screen
 
 ## Workflow
 
