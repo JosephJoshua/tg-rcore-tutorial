@@ -680,7 +680,8 @@ fn drain_input(game: &mut Game) {
                     game.ball_x = game.attached_ball_x();
                     game.ball_y = game.attached_ball_y();
                     game.ball_vx = FP; // slight right angle
-                    game.ball_vy = -INIT_BALL_SPEED;
+                    // Speed increases with level
+                    game.ball_vy = -INIT_BALL_SPEED - (game.level as i32 - 1) * FP / 2;
                 }
             }
             Some(b'\x05') => {
@@ -718,7 +719,11 @@ pub fn run_game() {
         let mut game_over = false;
 
         loop {
-            drain_input(&mut game);
+            if !game_over {
+                drain_input(&mut game);
+                // Re-check game_over after load could change lives
+                game_over = game.lives == 0;
+            }
 
             let now = get_time();
             if (now - last_tick) as usize >= 16 {
