@@ -274,7 +274,7 @@ fn init_game(state: &mut SharedState, rng: &mut Rng) {
 
 fn poll_key() -> u8 {
     let mut buf = [0u8; 1];
-    let ret = crate::read(crate::STDIN, &mut buf);
+    let ret = crate::read(crate::STDIN_BUFFERED, &mut buf);
     if ret > 0 {
         buf[0]
     } else {
@@ -399,7 +399,7 @@ pub fn run() {
         );
         parent_loop(state, &mut rng);
         let mut exit_code: i32 = 0;
-        crate::waitpid(pid as usize, &mut exit_code);
+        crate::waitpid(pid as isize, &mut exit_code);
     }
 }
 

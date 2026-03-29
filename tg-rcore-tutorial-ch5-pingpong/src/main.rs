@@ -398,6 +398,14 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
         PPN::new(mmio_start.floor().val()),
         build_flags("_WRV"),
     );
+    // Map DMA pool region (0x8500_0000..0x8550_0000) — identity-mapped, R+W
+    let dma_start = VAddr::<Sv39>::new(0x8500_0000);
+    let dma_end = VAddr::<Sv39>::new(0x8550_0000);
+    space.map_extern(
+        dma_start.floor()..dma_end.ceil(),
+        PPN::new(dma_start.floor().val()),
+        build_flags("_WRV"),
+    );
     // 映射异界传送门页面到虚拟地址空间最高页
     // 标志位 __G_XWRV：全局、可执行、可写、可读、有效
     space.map_extern(
@@ -671,50 +679,77 @@ mod impls {
             }
         }
 
-        /// read 系统调用：非阻塞 VirtIO 键盘输入
+        /// read 系统调用
         ///
-        /// Poll VirtIO keyboard for key press events.
-        /// Returns 1 if a key was read, 0 if no key available.
+        /// fd 0 (STDIN): blocking SBI console_getchar (for shell)
+        /// fd 3 (STDIN_BUFFERED): non-blocking VirtIO keyboard poll (for games)
         #[inline]
-        fn read(&self, _caller: Caller, fd: usize, buf: usize, _count: usize) -> isize {
-            if fd == STDIN {
-                const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
-                if let Some(mut ptr) = PROCESSOR
-                    .get_mut()
-                    .current()
-                    .unwrap()
-                    .address_space
-                    .translate::<u8>(VAddr::new(buf), WRITEABLE)
-                {
-                    #[cfg(target_arch = "riscv64")]
+        fn read(&self, _caller: Caller, fd: usize, buf: usize, count: usize) -> isize {
+            const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
+            match fd {
+                STDIN => {
+                    // Blocking SBI console read (shell needs this)
+                    if let Some(ptr) = PROCESSOR
+                        .get_mut()
+                        .current()
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(buf), WRITEABLE)
                     {
-                        let keyboard = unsafe {
-                            let p = &raw mut crate::KEYBOARD;
-                            (*p).as_mut()
-                        };
-                        if let Some(kbd) = keyboard {
-                            if let Some(event) = kbd.pop_pending_event() {
-                                if event.event_type == 1 && event.value == 1 {
-                                    let keycode = event.code as u8;
-                                    unsafe { *ptr.as_mut() = keycode };
-                                    return 1;
-                                }
+                        let mut write_ptr = unsafe { ptr.as_ref() } as *const u8 as *mut u8;
+                        for _ in 0..count {
+                            let c = tg_sbi::console_getchar() as u8;
+                            unsafe {
+                                *write_ptr = c;
+                                write_ptr = write_ptr.add(1);
                             }
                         }
-                        return 0;
+                        count as _
+                    } else {
+                        log::error!("ptr not writeable");
+                        -1
                     }
-                    #[cfg(not(target_arch = "riscv64"))]
+                }
+                3 => {
+                    // Non-blocking VirtIO keyboard poll (for games)
+                    if let Some(mut ptr) = PROCESSOR
+                        .get_mut()
+                        .current()
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(buf), WRITEABLE)
                     {
-                        let _ = ptr;
-                        return 0;
+                        #[cfg(target_arch = "riscv64")]
+                        {
+                            let keyboard = unsafe {
+                                let p = &raw mut crate::KEYBOARD;
+                                (*p).as_mut()
+                            };
+                            if let Some(kbd) = keyboard {
+                                if let Some(event) = kbd.pop_pending_event() {
+                                    if event.event_type == 1 && event.value == 1 {
+                                        let keycode = event.code as u8;
+                                        unsafe { *ptr.as_mut() = keycode };
+                                        return 1;
+                                    }
+                                }
+                            }
+                            return 0;
+                        }
+                        #[cfg(not(target_arch = "riscv64"))]
+                        {
+                            let _ = ptr;
+                            return 0;
+                        }
+                    } else {
+                        log::error!("ptr not writeable");
+                        -1
                     }
-                } else {
-                    log::error!("ptr not writeable");
+                }
+                _ => {
+                    log::error!("unsupported fd: {fd}");
                     -1
                 }
-            } else {
-                log::error!("unsupported fd: {fd}");
-                -1
             }
         }
     }
