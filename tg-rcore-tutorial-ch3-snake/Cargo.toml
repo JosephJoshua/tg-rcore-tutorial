@@ -1,0 +1,35 @@
+[package]
+name = "jsph-tg-rcore-tutorial-ch3-snake"
+description = "Chapter 3 Snake Game: Multiprogramming with VirtIO-GPU."
+version = "0.4.8"
+edition = "2024"
+authors = ["YdrMaster <ydrml@hotmail.com>","Yifan Wang<w-yf22@mails.tsinghua.edu.cn>","Yu Chen <yuchen@tsinghua.edu.cn>"]
+license = "GPL-3.0"
+exclude = ["tg-user/**"]
+
+[features]
+interrupt = []
+coop = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+riscv = "0.10.1"
+
+tg-sbi = { package = "tg-rcore-tutorial-sbi", path = "../tg-rcore-tutorial-sbi", version = "0.4.8", features = ["nobios"] }
+tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
+tg-console = { package = "tg-rcore-tutorial-console", path = "../tg-rcore-tutorial-console", version = "0.4.8" }
+tg-kernel-context = { package = "tg-rcore-tutorial-kernel-context", path = "../tg-rcore-tutorial-kernel-context", version = "0.4.8" }
+tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+virtio-drivers = "0.1.0"
+
+[build-dependencies]
+tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
