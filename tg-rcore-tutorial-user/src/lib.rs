@@ -23,6 +23,9 @@ pub mod snake;
 #[cfg(feature = "tetris")]
 pub mod tetris;
 
+#[cfg(feature = "breakout")]
+pub mod breakout;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {

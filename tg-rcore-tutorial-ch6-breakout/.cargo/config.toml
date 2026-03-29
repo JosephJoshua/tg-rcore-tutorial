@@ -1,0 +1,21 @@
+[build]
+target = "riscv64gc-unknown-none-elf"
+
+[target.riscv64gc-unknown-none-elf]
+runner = [
+    "qemu-system-riscv64",
+    "-machine", "virt",
+    "-serial", "stdio",
+    "-bios", "none",
+    "-drive", "file=target/riscv64gc-unknown-none-elf/debug/fs.img,if=none,format=raw,id=x0",
+    "-device", "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+    "-device", "virtio-gpu-device",
+    "-device", "virtio-keyboard-device",
+    "-kernel",
+]
+
+[env]
+TG_USER_CRATE     = "tg-rcore-tutorial-user"
+TG_USER_LOCAL_DIR = "tg-rcore-tutorial-user"
+TG_USER_VERSION   = "0.4.8"
+TG_USER_DIR       = { value = "../tg-rcore-tutorial-user", relative = true }

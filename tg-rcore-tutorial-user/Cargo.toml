@@ -31,5 +31,6 @@ customizable-buddy = "0.0.2"
 tangram = []
 snake = []
 tetris = []
+breakout = []
 
 [workspace]
