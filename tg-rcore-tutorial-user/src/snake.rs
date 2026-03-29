@@ -687,8 +687,9 @@ fn draw_game_over(score: u32) {
     let score_x = ox + (ow - digits * CHAR_SPACING) / 2;
     draw_number(score_x, oy + 158, score, TEXT_COLOR, OVERLAY_COLOR);
 
-    // Hint text: "any key to restart"
-    draw_text_mixed(ox + 60, oy + oh - 30, b"any key to restart", TEXT_DIM, OVERLAY_COLOR);
+    // Hint text: "any key to restart" (18 chars)
+    let hint_x = ox + (ow - 18 * CHAR_SPACING) / 2;
+    draw_text_mixed(hint_x, oy + oh - 30, b"any key to restart", TEXT_DIM, OVERLAY_COLOR);
 }
 
 // ========== Input helpers ==========
