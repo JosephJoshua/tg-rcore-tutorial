@@ -131,6 +131,11 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
 
     cmd.args(["--features", "breakout"]);
 
+    // Make initproc exec "breakout" instead of "user_shell"
+    if name == "initproc" {
+        cmd.env("CHAPTER", "breakout");
+    }
+
     if base_address != 0 {
         cmd.env("BASE_ADDRESS", base_address.to_string());
     }

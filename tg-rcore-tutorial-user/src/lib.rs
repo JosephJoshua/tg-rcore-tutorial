@@ -94,8 +94,13 @@ pub const STDIN_BUFFERED: usize = 3;
 
 pub fn getchar() -> u8 {
     let mut c = [0u8; 1];
-    read(STDIN, &mut c);
-    c[0]
+    loop {
+        let n = read(STDIN, &mut c);
+        if n > 0 && c[0] != 0 {
+            return c[0];
+        }
+        sched_yield();
+    }
 }
 
 struct Console;
