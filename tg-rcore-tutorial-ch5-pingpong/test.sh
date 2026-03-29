@@ -1,94 +1,33 @@
-#!/bin/bash
-# ch5 测试脚本
-#
-# 用法：
-#   ./test.sh          # 运行全部测试（等价于 ./test.sh all）
-#   ./test.sh base     # 仅运行基础测试
-#   ./test.sh exercise # 仅运行练习测试
-#   ./test.sh all      # 运行基础 + 练习测试
-
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# 检查并安装 tg-rcore-tutorial-checker
-ensure_tg_checker() {
-    if ! command -v tg-rcore-tutorial-checker &> /dev/null; then
-        echo -e "${YELLOW}tg-rcore-tutorial-checker 未安装，正在安装...${NC}"
-        if cargo install tg-rcore-tutorial-checker; then
-            echo -e "${GREEN}✓ tg-rcore-tutorial-checker 安装成功${NC}"
-        else
-            echo -e "${RED}✗ tg-rcore-tutorial-checker 安装失败${NC}"
-            exit 1
-        fi
-    fi
-}
+if ! command -v tg-rcore-tutorial-checker &> /dev/null; then
+    echo -e "${YELLOW}Installing tg-rcore-tutorial-checker...${NC}"
+    cargo install tg-rcore-tutorial-checker
+fi
 
-ensure_tg_checker
+echo -e "${YELLOW}Building ch5-pingpong kernel...${NC}"
+cargo build
 
-# 使用 pipefail 确保管道中任意命令失败都能被捕获
-set -o pipefail
+KERNEL="target/riscv64gc-unknown-none-elf/debug/jsph-tg-rcore-tutorial-ch5-pingpong"
 
-run_base() {
-    echo "运行 ch5 基础测试..."
-    cargo clean
-    export CHAPTER=-5
-    echo -e "${YELLOW}────────── cargo run 输出 ──────────${NC}"
-
-    # 使用 tee 将 cargo run 的输出同时显示在终端和传递给 tg-rcore-tutorial-checker
-    if cargo run 2>&1 | tee /dev/stderr | tg-rcore-tutorial-checker --ch 5; then
-        echo ""
-        echo -e "${YELLOW}────────── 测试结果 ──────────${NC}"
-        echo -e "${GREEN}✓ ch5 基础测试通过${NC}"
-        cargo clean
-        return 0
-    else
-        echo ""
-        echo -e "${YELLOW}────────── 测试结果 ──────────${NC}"
-        echo -e "${RED}✗ ch5 基础测试失败${NC}"
-        cargo clean
-        return 1
-    fi
-}
-
-run_exercise() {
-    echo "运行 ch5 练习测试..."
-    cargo clean
-    export CHAPTER=5
-    echo -e "${YELLOW}────────── cargo run --features exercise 输出 ──────────${NC}"
-
-    if cargo run --features exercise 2>&1 | tee /dev/stderr | tg-rcore-tutorial-checker --ch 5 --exercise; then
-        echo ""
-        echo -e "${YELLOW}────────── 测试结果 ──────────${NC}"
-        echo -e "${GREEN}✓ ch5 练习测试通过${NC}"
-        cargo clean
-        return 0
-    else
-        echo ""
-        echo -e "${YELLOW}────────── 测试结果 ──────────${NC}"
-        echo -e "${RED}✗ ch5 练习测试失败${NC}"
-        cargo clean
-        return 1
-    fi
-}
-
-case "${1:-all}" in
-    base)
-        run_base
-        ;;
-    exercise)
-        run_exercise
-        ;;
-    all)
-        run_base
-        echo ""
-        run_exercise
-        ;;
-    *)
-        echo "用法: $0 [base|exercise|all]"
-        exit 1
-        ;;
-esac
+echo -e "${YELLOW}Running ch5-pingpong tests (90s timeout)...${NC}"
+if timeout 90 qemu-system-riscv64 \
+    -machine virt \
+    -serial stdio \
+    -bios none \
+    -device virtio-gpu-device \
+    -device virtio-keyboard-device \
+    -display none \
+    -kernel "$KERNEL" \
+    2>&1 | tee /dev/stderr | tg-rcore-tutorial-checker --ch 5; then
+    echo -e "${GREEN}PASS${NC}"
+else
+    echo -e "${RED}FAIL${NC}"
+    exit 1
+fi

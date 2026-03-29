@@ -82,7 +82,7 @@ fn build_apps() {
     let case_key = if env::var("CARGO_FEATURE_EXERCISE").is_ok() {
         "ch5_exercise"
     } else {
-        "ch5"
+        "ch5_pingpong"
     };
     let cases = cases_map.remove(case_key).unwrap_or_default();
     let base = cases.base.unwrap_or(0);
@@ -125,6 +125,8 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
         "--target",
         TARGET_ARCH,
     ]);
+
+    cmd.args(["--features", "pingpong"]);
 
     if base_address != 0 {
         cmd.env("BASE_ADDRESS", base_address.to_string());
