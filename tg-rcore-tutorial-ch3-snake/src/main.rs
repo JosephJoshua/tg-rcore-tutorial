@@ -52,14 +52,24 @@ static mut KB_HEAD: usize = 0;
 static mut KB_TAIL: usize = 0;
 
 /// Poll SBI console and push available bytes into ring buffer.
+/// Non-blocking UART read (bypasses blocking SBI console_getchar).
+#[cfg(target_arch = "riscv64")]
+fn uart_trygetchar() -> Option<u8> {
+    const UART_LSR: usize = 0x1000_0005;
+    const UART_RBR: usize = 0x1000_0000;
+    let lsr = unsafe { (UART_LSR as *const u8).read_volatile() };
+    if lsr & 1 != 0 {
+        Some(unsafe { (UART_RBR as *const u8).read_volatile() })
+    } else {
+        None
+    }
+}
+
+/// Poll UART and push available bytes into ring buffer.
 #[cfg(all(target_arch = "riscv64", feature = "interrupt"))]
 fn poll_keyboard() {
     unsafe {
-        loop {
-            let ch = tg_sbi::console_getchar();
-            if ch == usize::MAX {
-                break;
-            }
+        while let Some(ch) = uart_trygetchar() {
             let next_tail = (KB_TAIL + 1) % KB_BUF_SIZE;
             if next_tail == KB_HEAD {
                 KB_HEAD = (KB_HEAD + 1) % KB_BUF_SIZE;
@@ -141,8 +151,13 @@ extern "C" fn rust_main() -> ! {
         let (gpu_driver, fb_info) = gpu::init();
         let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
 
-        for byte in buf.iter_mut() {
-            *byte = 0xFF;
+        // Fill with snake game background color (#1A1A2E BGRA)
+        // so the user-side doesn't need to do an expensive full-screen fill
+        for i in (0..buf.len()).step_by(4) {
+            buf[i] = 0x2E;     // B
+            buf[i + 1] = 0x1A; // G
+            buf[i + 2] = 0x1A; // R
+            buf[i + 3] = 0xFF; // A
         }
 
         let mut gpu_driver = gpu_driver;
@@ -319,13 +334,18 @@ mod impls {
             }
             match fd {
                 STDIN => {
-                    let ch = tg_sbi::console_getchar();
-                    if ch == usize::MAX {
-                        0
-                    } else {
-                        unsafe { *(buf as *mut u8) = ch as u8; }
-                        1
+                    // Non-blocking UART read — SBI console_getchar blocks,
+                    // so read the 16550 registers directly.
+                    #[cfg(target_arch = "riscv64")]
+                    match crate::uart_trygetchar() {
+                        Some(ch) => {
+                            unsafe { *(buf as *mut u8) = ch; }
+                            1
+                        }
+                        None => 0,
                     }
+                    #[cfg(not(target_arch = "riscv64"))]
+                    { -1 }
                 }
                 3 => {
                     match crate::kb_pop() {

@@ -425,26 +425,7 @@ fn draw_score(score: u32) {
 }
 
 fn draw_initial_screen(game: &Game) {
-    let (sw, sh) = fb_info();
-
-    // Fill background in strips
-    let strip_h = 20u32;
-    let strip_pixels = sw as usize * strip_h as usize;
-    let mut strip = vec![0u8; strip_pixels * 4];
-    for i in 0..strip_pixels {
-        let off = i * 4;
-        strip[off] = BG_COLOR[0];
-        strip[off + 1] = BG_COLOR[1];
-        strip[off + 2] = BG_COLOR[2];
-        strip[off + 3] = BG_COLOR[3];
-    }
-    let mut y = 0u32;
-    while y < sh {
-        let h = core::cmp::min(strip_h, sh - y);
-        fb_write(0, y, sw, h, strip.as_ptr());
-        y += strip_h;
-    }
-    drop(strip);
+    // Background is filled by kernel (BG_COLOR). Only draw game elements.
 
     // Draw border
     draw_rect(BOARD_X - 2, BOARD_Y - 2, BOARD_PX_W + 4, 2, BORDER_COLOR);
