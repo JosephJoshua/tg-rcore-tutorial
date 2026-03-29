@@ -8,6 +8,7 @@ runner = [
     "-serial", "stdio",
     "-bios", "none",
     "-device", "virtio-gpu-device",
+    "-device", "virtio-keyboard-device",
     "-kernel",
 ]
 

@@ -13,7 +13,7 @@ mod task;
 #[cfg(target_arch = "riscv64")]
 mod allocator;
 #[cfg(target_arch = "riscv64")]
-mod gpu;
+mod virtio;
 
 #[macro_use]
 extern crate tg_console;
@@ -25,7 +25,7 @@ use tg_console::log;
 use tg_sbi;
 
 #[cfg(target_arch = "riscv64")]
-use virtio_drivers::{MmioTransport, VirtIOGpu};
+use virtio_drivers::{MmioTransport, VirtIOGpu, VirtIOInput};
 
 /// Global GPU driver.
 #[cfg(target_arch = "riscv64")]
@@ -33,7 +33,11 @@ static mut GPU: Option<VirtIOGpu<'static, allocator::HalImpl, MmioTransport>> = 
 
 /// Global framebuffer info.
 #[cfg(target_arch = "riscv64")]
-static mut FRAMEBUFFER: Option<gpu::Framebuffer> = None;
+static mut FRAMEBUFFER: Option<virtio::Framebuffer> = None;
+
+/// Global keyboard driver.
+#[cfg(target_arch = "riscv64")]
+static mut KEYBOARD: Option<VirtIOInput<allocator::HalImpl, MmioTransport>> = None;
 
 /// Custom syscall IDs for framebuffer operations.
 const SYSCALL_FB_INFO: usize = 2000;
@@ -51,30 +55,54 @@ static mut KB_HEAD: usize = 0;
 /// Ring buffer tail (write pointer).
 static mut KB_TAIL: usize = 0;
 
-/// Poll SBI console and push available bytes into ring buffer.
-/// Non-blocking UART read (bypasses blocking SBI console_getchar).
-#[cfg(target_arch = "riscv64")]
-fn uart_trygetchar() -> Option<u8> {
-    const UART_LSR: usize = 0x1000_0005;
-    const UART_RBR: usize = 0x1000_0000;
-    let lsr = unsafe { (UART_LSR as *const u8).read_volatile() };
-    if lsr & 1 != 0 {
-        Some(unsafe { (UART_RBR as *const u8).read_volatile() })
-    } else {
-        None
+/// Translate a VirtIO keycode to an ASCII byte for the snake game.
+///
+/// Only key-press events (event_type == 1, value == 1) should be passed here.
+fn translate_keycode(code: u16) -> u8 {
+    match code {
+        17 | 103 => b'w',   // W or Up
+        30 | 105 => b'a',   // A or Left
+        31 | 108 => b's',   // S or Down
+        32 | 106 => b'd',   // D or Right
+        28 => b'\r',         // Enter
+        57 => b' ',          // Space
+        _ => b'\x01',        // Any other key — non-zero so wait_for_key works
     }
 }
 
-/// Poll UART and push available bytes into ring buffer.
+/// Poll the VirtIO keyboard and return the next key press as a byte.
+///
+/// Returns `None` if no key press is pending or no keyboard is available.
+#[cfg(target_arch = "riscv64")]
+fn keyboard_trygetchar() -> Option<u8> {
+    let kbd = unsafe {
+        let p = &raw mut KEYBOARD;
+        (*p).as_mut()
+    }?;
+    loop {
+        match kbd.pop_pending_event() {
+            Some(event) => {
+                // EV_KEY == 1, value == 1 means key press
+                if event.event_type == 1 && event.value == 1 {
+                    return Some(translate_keycode(event.code));
+                }
+                // Otherwise skip this event (key release, repeat, etc.) and try next
+            }
+            None => return None,
+        }
+    }
+}
+
+/// Poll VirtIO keyboard and push key presses into the ring buffer.
 #[cfg(all(target_arch = "riscv64", feature = "interrupt"))]
 fn poll_keyboard() {
     unsafe {
-        while let Some(ch) = uart_trygetchar() {
+        while let Some(ch) = keyboard_trygetchar() {
             let next_tail = (KB_TAIL + 1) % KB_BUF_SIZE;
             if next_tail == KB_HEAD {
                 KB_HEAD = (KB_HEAD + 1) % KB_BUF_SIZE;
             }
-            KB_BUF[KB_TAIL] = ch as u8;
+            KB_BUF[KB_TAIL] = ch;
             KB_TAIL = next_tail;
         }
     }
@@ -148,7 +176,8 @@ extern "C" fn rust_main() -> ! {
 
     #[cfg(target_arch = "riscv64")]
     {
-        let (gpu_driver, fb_info) = gpu::init();
+        let devices = virtio::init();
+        let (mut gpu_driver, fb_info) = devices.gpu;
         let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
 
         // Fill with snake game background color (#1A1A2E BGRA)
@@ -160,12 +189,12 @@ extern "C" fn rust_main() -> ! {
             buf[i + 3] = 0xFF; // A
         }
 
-        let mut gpu_driver = gpu_driver;
         gpu_driver.flush().expect("GPU flush failed");
 
         unsafe {
             GPU = Some(gpu_driver);
             FRAMEBUFFER = Some(fb_info);
+            KEYBOARD = devices.keyboard;
         }
 
         unsafe { core::arch::asm!("csrs scounteren, {}", in(reg) (1 << 1)) };
@@ -334,10 +363,9 @@ mod impls {
             }
             match fd {
                 STDIN => {
-                    // Non-blocking UART read — SBI console_getchar blocks,
-                    // so read the 16550 registers directly.
+                    // Non-blocking VirtIO keyboard read — poll for key press events.
                     #[cfg(target_arch = "riscv64")]
-                    match crate::uart_trygetchar() {
+                    match crate::keyboard_trygetchar() {
                         Some(ch) => {
                             unsafe { *(buf as *mut u8) = ch; }
                             1
