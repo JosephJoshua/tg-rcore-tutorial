@@ -18,6 +18,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TG_USER_CRATE");
     println!("cargo:rerun-if-env-changed=TG_USER_LOCAL_DIR");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_INTERRUPT");
+    println!("cargo:rerun-if-env-changed=TG_SKIP_USER_APPS");
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 

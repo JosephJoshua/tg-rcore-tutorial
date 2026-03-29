@@ -36,7 +36,6 @@ pub fn init() -> (VirtIOGpu<'static, HalImpl, MmioTransport>, Framebuffer) {
     let mut gpu = VirtIOGpu::new(transport).expect("failed to create VirtIOGpu");
 
     let (width, height) = gpu.resolution().expect("failed to get resolution");
-
     let (ptr, len) = {
         let buf = gpu.setup_framebuffer().expect("failed to setup framebuffer");
         (buf.as_mut_ptr(), buf.len())

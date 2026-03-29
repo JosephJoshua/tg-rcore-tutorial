@@ -100,7 +100,7 @@ const APP_CAPACITY: usize = 32;
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
-    const STACK_SIZE: usize = 32 * 4096; // 128 KiB
+    const STACK_SIZE: usize = (APP_CAPACITY + 10) * 8192; // 336 KiB — TCBs need ~272 KiB + GPU init overhead
     #[unsafe(link_section = ".boot.stack")]
     static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
 
