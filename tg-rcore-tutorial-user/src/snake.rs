@@ -585,7 +585,26 @@ fn draw_text_mixed(x: u32, y: u32, text: &[u8], fg: [u8; 4], bg: [u8; 4]) {
 }
 
 fn draw_initial_screen(game: &Game) {
-    // Background is filled by kernel (BG_COLOR). Only draw game elements.
+    let (sw, sh) = fb_info();
+
+    // Fill background in strips (user-side — kernel stays game-agnostic)
+    let strip_h = 40u32;
+    let strip_pixels = sw as usize * strip_h as usize;
+    let mut strip = vec![0u8; strip_pixels * 4];
+    for i in 0..strip_pixels {
+        let off = i * 4;
+        strip[off] = BG_COLOR[0];
+        strip[off + 1] = BG_COLOR[1];
+        strip[off + 2] = BG_COLOR[2];
+        strip[off + 3] = BG_COLOR[3];
+    }
+    let mut y = 0u32;
+    while y < sh {
+        let h = core::cmp::min(strip_h, sh - y);
+        fb_write(0, y, sw, h, strip.as_ptr());
+        y += strip_h;
+    }
+    drop(strip);
 
     // Draw border — 3px: 1px BORDER_GLOW outer, 1px gap (BG_COLOR), 1px BORDER_MAIN inner
     // Outer glow (1px)

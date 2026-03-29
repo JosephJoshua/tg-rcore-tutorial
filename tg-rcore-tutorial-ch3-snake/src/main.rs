@@ -177,19 +177,7 @@ extern "C" fn rust_main() -> ! {
     #[cfg(target_arch = "riscv64")]
     {
         let devices = virtio::init();
-        let (mut gpu_driver, fb_info) = devices.gpu;
-        let buf = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr, fb_info.len) };
-
-        // Fill with snake game background color (#0D0D1A BGRA)
-        // so the user-side doesn't need to do an expensive full-screen fill
-        for i in (0..buf.len()).step_by(4) {
-            buf[i] = 0x1A;     // B
-            buf[i + 1] = 0x0D; // G
-            buf[i + 2] = 0x0D; // R
-            buf[i + 3] = 0xFF; // A
-        }
-
-        gpu_driver.flush().expect("GPU flush failed");
+        let (gpu_driver, fb_info) = devices.gpu;
 
         unsafe {
             GPU = Some(gpu_driver);
