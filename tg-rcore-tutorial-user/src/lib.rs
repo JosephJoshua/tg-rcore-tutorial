@@ -20,6 +20,9 @@ pub mod tangram;
 #[cfg(feature = "snake")]
 pub mod snake;
 
+#[cfg(feature = "tetris")]
+pub mod tetris;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {

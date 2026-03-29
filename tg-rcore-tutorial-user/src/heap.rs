@@ -29,8 +29,12 @@ impl<T> StaticCell<T> {
 }
 
 pub fn init() {
-    // 托管空间 512 KiB (tangram pieces need up to ~210 KiB per bounding box)
+    // 512 KiB when games/tangram need large buffers, 16 KiB otherwise.
+    // Ch4 virtual memory has issues with large static BSS in customizable-buddy 0.0.2.
+    #[cfg(any(feature = "tangram", feature = "snake"))]
     const MEMORY_SIZE: usize = 512 << 10;
+    #[cfg(not(any(feature = "tangram", feature = "snake")))]
+    const MEMORY_SIZE: usize = 16 << 10;
     static MEMORY: StaticCell<[u8; MEMORY_SIZE]> = StaticCell::new([0u8; MEMORY_SIZE]);
     unsafe {
         heap_mut().init(
