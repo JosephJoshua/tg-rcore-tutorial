@@ -17,6 +17,9 @@ pub use tg_syscall::*;
 #[cfg(feature = "tangram")]
 pub mod tangram;
 
+#[cfg(feature = "snake")]
+pub mod snake;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {
@@ -79,6 +82,9 @@ fn panic_handler(panic_info: &core::panic::PanicInfo) -> ! {
     exit(1);
     unreachable!()
 }
+
+/// File descriptor for buffered keyboard input (timer-polled ring buffer in kernel).
+pub const STDIN_BUFFERED: usize = 3;
 
 pub fn getchar() -> u8 {
     let mut c = [0u8; 1];

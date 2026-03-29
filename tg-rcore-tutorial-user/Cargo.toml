@@ -29,5 +29,6 @@ customizable-buddy = "0.0.2"
 
 [features]
 tangram = []
+snake = []
 
 [workspace]
