@@ -425,13 +425,13 @@ fn child_loop(state: &mut SharedState) -> ! {
 }
 
 fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
+    crate::println!("[pingpong] Press any key on VNC to start!");
+    crate::println!("[pingpong] P1: W/S  |  P2: Up/Down arrows");
     draw_background();
     draw_score(state.score1, state.score2);
     draw_paddle(PADDLE1_X, state.paddle1_y);
     draw_paddle(PADDLE2_X, state.paddle2_y);
-    // "PRESS SPACE TO START" = 20 chars
-    draw_message(20);
-    fb_flush(); // flush once after all initial drawing
+    fb_flush();
 
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
@@ -445,7 +445,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
 
         match state.game_state {
             STATE_WAITING => {
-                if key == KEY_SPACE {
+                if key != 0 {
                     state.game_state = STATE_PLAYING;
                     erase_message_area();
                 }
@@ -483,26 +483,18 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 update_physics(state, rng);
             }
             STATE_POINT_SCORED => {
-                if key == KEY_SPACE {
+                if key != 0 {
                     state.game_state = STATE_PLAYING;
                     erase_message_area();
-                } else {
-                    // "POINT! PRESS SPACE" = 18 chars
-                    draw_message(18);
                 }
             }
             STATE_GAME_OVER => {
-                if state.score1 >= WIN_SCORE {
-                    // "PLAYER 1 WINS! ENTER" = 21 chars
-                    draw_message(21);
-                } else {
-                    // "PLAYER 2 WINS! ENTER" = 21 chars
-                    draw_message(21);
-                }
-                if key == KEY_ENTER {
+                if key != 0 {
                     erase_message_area();
                     init_game(state, rng);
                     draw_background();
+                    draw_score(0, 0);
+                    fb_flush();
                     prev_score1 = 0;
                     prev_score2 = 0;
                 }
