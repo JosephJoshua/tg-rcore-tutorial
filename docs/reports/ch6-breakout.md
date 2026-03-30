@@ -44,7 +44,7 @@ ch6 在 ch5 进程管理的基础上引入了 **磁盘文件系统**（easy-fs o
 **main.rs 核心变更**
 - `MMIO` 扩展为 `(0x1000_0000, 0x9000)` + `(0x8500_0000, 0x50_0000)`
 - `MEMORY` 从 48 MiB 增至 70 MiB
-- FB_INFO (2000) / FB_WRITE (2001) / FB_FLUSH (2002) 三个自定义系统调用
+- FB_INFO (2000) / FB_WRITE (2001) / FB_FLUSH (2003) 三个自定义系统调用
 - FB_WRITE 仅复制像素到帧缓冲区，不触发 GPU 刷新
 - FB_FLUSH 单独触发 GPU 刷新（每帧调用一次，大幅提升性能）
 - `IO::read` 的 STDIN 分支：替换阻塞 `tg_sbi::console_getchar()` 为非阻塞 `keyboard_trygetchar()`
@@ -56,7 +56,7 @@ ch6 在 ch5 进程管理的基础上引入了 **磁盘文件系统**（easy-fs o
 |---------|-----|------|-------------|
 | FB_INFO | 2000 | 无 | 返回 (width << 32) \| height |
 | FB_WRITE | 2001 | x, y, w, h, data_ptr | data_ptr 逐行翻译，不刷新 GPU |
-| FB_FLUSH | 2002 | 无 | 触发 GPU 帧缓冲区刷新 |
+| FB_FLUSH | 2003 | 无 | 触发 GPU 帧缓冲区刷新 |
 | read | 63 | fd=0, buf, count | VirtIO 键盘轮询，无按键返回 0 |
 | open | 56 | path, flags | 存档用 CREATE\|WRONLY\|TRUNC，读档用 RDONLY |
 | write | 64 | fd, buf, count | 存档数据写入 easy-fs |
@@ -107,7 +107,7 @@ ch6 在 ch5 进程管理的基础上引入了 **磁盘文件系统**（easy-fs o
 - `Cargo.toml`：crate 名 `jsph-tg-rcore-tutorial-ch6-breakout`
 - `build.rs`：case_key 为 `ch6_breakout`，用户程序构建添加 `--features breakout`，initproc 构建设置 `CHAPTER=breakout`
 - `cases.toml`：新增 `ch6_breakout` 配置节（23 标准程序 + breakout）
-- 用户 `lib.rs`：新增 `fb_flush()` 系统调用封装（syscall 2002）
+- 用户 `lib.rs`：新增 `fb_flush()` 系统调用封装（syscall 2003）
 
 ## 遇到的问题
 
@@ -128,7 +128,7 @@ ch6 在 ch5 进程管理的基础上引入了 **磁盘文件系统**（easy-fs o
 
 **根因**：`handle_fb_write` 每次调用都执行 `gpu.flush()`。`draw_rect` 对每行像素调用一次 `fb_write`，一个 920×600 的矩形产生 600 次 GPU 刷新。增量帧中球体擦除/绘制 + HUD 更新也产生数十次刷新。
 
-**修复**：将 FB_WRITE 和 FB_FLUSH 分离为独立系统调用（2001/2002）。FB_WRITE 仅复制像素到帧缓冲区，用户代码每帧末尾调用一次 `fb_flush()` 触发单次 GPU 刷新。同时 HUD 数值仅在 score/lives/level 变化时重绘。
+**修复**：将 FB_WRITE 和 FB_FLUSH 分离为独立系统调用（2001/2003）。FB_WRITE 仅复制像素到帧缓冲区，用户代码每帧末尾调用一次 `fb_flush()` 触发单次 GPU 刷新。同时 HUD 数值仅在 score/lives/level 变化时重绘。（注：ID 2002 由 ch5-pingpong 的 SHM_CREATE 使用。）
 
 ### 关键 bug 3：缺少 B 和 U 字形
 
