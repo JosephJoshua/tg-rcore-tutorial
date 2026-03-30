@@ -79,7 +79,12 @@ fn build_apps_and_pack_fs() {
         panic!("failed to parse cases.toml: {err}")
     });
 
-    let cases = cases_map.remove("ch7").unwrap_or_default();
+    let case_key = if env::var("CARGO_FEATURE_EXERCISE").is_ok() {
+        "ch7_exercise"
+    } else {
+        "ch7_pacman"
+    };
+    let cases = cases_map.remove(case_key).unwrap_or_default();
     let base = cases.base.unwrap_or(0);
     let step = cases.step.unwrap_or(0);
     let names = cases.cases.unwrap_or_default();
@@ -122,6 +127,13 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
         "--target",
         TARGET_ARCH,
     ]);
+
+    cmd.args(["--features", "pacman"]);
+
+    // Make initproc exec "pacman" instead of "user_shell"
+    if name == "initproc" {
+        cmd.env("CHAPTER", "pacman");
+    }
 
     if base_address != 0 {
         cmd.env("BASE_ADDRESS", base_address.to_string());

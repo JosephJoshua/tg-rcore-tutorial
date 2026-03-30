@@ -33,5 +33,6 @@ snake = []
 tetris = []
 pingpong = []
 breakout = []
+pacman = []
 
 [workspace]

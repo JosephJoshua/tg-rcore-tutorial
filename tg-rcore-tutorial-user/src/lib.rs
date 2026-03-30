@@ -29,6 +29,9 @@ pub mod pingpong;
 #[cfg(feature = "breakout")]
 pub mod breakout;
 
+#[cfg(feature = "pacman")]
+pub mod pacman;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {
