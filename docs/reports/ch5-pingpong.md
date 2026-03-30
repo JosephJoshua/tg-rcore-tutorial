@@ -3,7 +3,7 @@
 ## 实现内容
 
 ### 目标
-扩展 ch5 进程管理系统，通过 VirtIO-GPU 帧缓冲区渲染和 VirtIO 键盘输入实现一个双人 Pong 游戏。游戏使用 **fork 创建两个进程**，通过**内核管理的共享内存页**通信，演示 ch5 的 fork/wait/exit 进程管理与 Sv39 虚拟内存、VirtIO 设备驱动的结合。
+扩展 ch5 进程管理系统，通过 VirtIO-GPU 帧缓冲区渲染和 VirtIO 键盘输入实现一个双人 Pong 游戏。游戏使用 **fork 创建三个进程**（一个协调者 + 两个对称的玩家子进程），通过**内核管理的共享内存页**通信，演示 ch5 的 fork/wait/exit 进程管理与 Sv39 虚拟内存、VirtIO 设备驱动的结合。
 
 ### 架构设计
 
@@ -14,8 +14,8 @@ ch5 在 ch4 虚拟内存基础上引入完整的**进程管理**：fork 深拷�
 - 新增 SHM_CREATE 系统调用（ID 2002）：分配物理页，映射到进程地址空间 0x3000_0000
 - 修改 fork() 实现：检测共享页，子进程中 unmap 深拷贝副本，remap 到父进程的同一物理页号
 - 新增 FB_FLUSH 系统调用（ID 2003）：将 GPU 刷新与像素写入解耦
-- 父进程读取所有键盘事件，通过共享内存传递 P2 输入给子进程
-- 子进程根据共享内存中的输入标志移动 paddle2_y
+- 父进程（协调者）读取所有键盘事件，通过共享内存传递 P1/P2 输入给两个子进程
+- 两个对称的子进程分别根据共享内存中的输入标志移动各自的球拍
 
 **与 ch4-tetris 的关键区别**
 
@@ -28,21 +28,23 @@ ch5 在 ch4 虚拟内存基础上引入完整的**进程管理**：fork 深拷�
 | GPU 刷新 | 每次 fb_write 后刷新 | 独立 FB_FLUSH 系统调用，每帧一次 |
 | 键盘驱动版本 | virtio-drivers 0.1.0 | virtio-drivers 0.3.0（修复输入队列 bug） |
 
-**双进程 IPC 架构**
+**三进程对称 IPC 架构**
 
 ```
-父进程（player 1 + 物理引擎 + 渲染）：
-  VirtIO 键盘 -> W/S 按住？ -> 直接移动 paddle1_y
+父进程（协调者：键盘 + 物理引擎 + 渲染）：
+  VirtIO 键盘 -> W/S 按住？ -> 写入 p1_up/p1_down 到共享内存
                -> Up/Down 按住？ -> 写入 p2_up/p2_down 到共享内存
-  从共享内存读取 paddle2_y -> 渲染两个球拍
+  从共享内存读取 paddle1_y/paddle2_y -> 渲染两个球拍
   运行球物理 -> 渲染球 + 分数 -> fb_flush
 
-子进程（player 2 球拍控制）：
-  从共享内存读取 p2_up/p2_down -> 移动 paddle2_y -> 清除标志
-  yield
+子进程 1（player 1 球拍控制）：
+  从共享内存读取 p1_up/p1_down -> 移动 paddle1_y -> 清除标志 -> yield
+
+子进程 2（player 2 球拍控制）：
+  从共享内存读取 p2_up/p2_down -> 移动 paddle2_y -> 清除标志 -> yield
 ```
 
-共享内存双向流动：父进程写输入标志，子进程写球拍位置。
+共享内存双向流动：父进程写输入标志，两个子进程写各自的球拍位置。两个玩家子进程结构完全对称，仅通过 player 编号参数化。
 
 ### 内核侧模块（tg-rcore-tutorial-ch5-pingpong/）
 
@@ -90,7 +92,8 @@ struct SharedState {
     score1/score2: u32,
     tick: u32,
     game_state: u32,          // 0=等待, 1=进行中, 2=得分暂停, 3=游戏结束
-    p2_up/p2_down: u8,        // 输入标志
+    p1_up/p1_down: u8,        // P1 输入标志（父进程写，子进程 1 读）
+    p2_up/p2_down: u8,        // P2 输入标志（父进程写，子进程 2 读）
 }
 ```
 
@@ -209,7 +212,7 @@ tg-rcore-tutorial-user/  (修改)
   cases.toml          # 新增 ch5_pingpong 配置节
   src/
     lib.rs            # 新增 pingpong 模块、shm_create() 和 fb_flush() 系统调用封装
-    pingpong.rs       # 双进程 Pong 游戏：物理引擎、IPC、霓虹渲染 (~560 行)
+    pingpong.rs       # 三进程 Pong 游戏：物理引擎、对称 IPC、霓虹渲染 (~590 行)
     bin/
       pingpong.rs     # 二进制入口 (feature-gated body)
 ```
@@ -242,7 +245,7 @@ VPN::MAX      异界传送门（内核/用户共享）
 - `TG_SKIP_USER_APPS=1 cargo check`：通过
 - `cargo publish --dry-run`（用户 crate）：通过
 - `bash test.sh`：ch5 checker 校验 14/14 通过
-- `cargo run` + VNC 连接：双人游戏画面正常，W/S 和 Up/Down 同时操控球拍，球碰撞/计分/加速正常，得分后 3 秒暂停 + 分数闪烁，游戏结束显示 "P1"/"P2" 霓虹横幅
+- `cargo run` + VNC 连接：三进程（协调者 + 2 玩家）游戏画面正常，W/S 和 Up/Down 同时操控球拍，球碰撞/计分/加速正常，得分后 3 秒暂停 + 分数闪烁，游戏结束显示 "P1"/"P2" 霓虹横幅
 
 ## 设计决策
 
@@ -250,7 +253,7 @@ VPN::MAX      异界传送门（内核/用户共享）
 
 2. **升级 virtio-drivers 到 0.3.0**：而非在 0.1.0 上做 MMIO 写入 workaround。v0.3.0 修复了输入队列通知 bug，API 变更（新 Hal trait 方法）可控。
 
-3. **父进程统一读取键盘**：VirtIO 键盘只有一个事件队列，双进程竞争读取会互相消耗事件。由父进程统一读取，通过共享内存将 P2 输入传递给子进程，保留了 IPC 教学模式。
+3. **三进程对称架构**：VirtIO 键盘只有一个事件队列，多进程竞争读取会互相消耗事件。由父进程（协调者）统一读取键盘，通过共享内存将 P1/P2 输入分别传递给两个对称的子进程。两个玩家子进程结构完全相同（仅 player 编号不同），各自负责移动自己的球拍。父进程不直接操控任何球拍，仅负责输入分发、物理引擎和渲染。
 
 4. **按键按住状态追踪**：内核返回按下/释放事件，用户空间维护 `KeyState` 结构。球拍在按键按住时每帧移动，与球物理引擎速度匹配，操控流畅。
 
