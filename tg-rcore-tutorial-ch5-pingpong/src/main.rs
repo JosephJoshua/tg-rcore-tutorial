@@ -180,7 +180,7 @@ const SHARED_MEM_VA: usize = 0x3000_0000;
 
 /// Global GPU driver.
 #[cfg(target_arch = "riscv64")]
-static mut GPU: Option<virtio_drivers::VirtIOGpu<'static, crate::allocator::HalImpl, virtio_drivers::MmioTransport>> = None;
+static mut GPU: Option<virtio_drivers::device::gpu::VirtIOGpu<crate::allocator::HalImpl, virtio_drivers::transport::mmio::MmioTransport>> = None;
 
 /// Global framebuffer info.
 #[cfg(target_arch = "riscv64")]
@@ -188,11 +188,7 @@ static mut FRAMEBUFFER: Option<crate::virtio::Framebuffer> = None;
 
 /// Global keyboard driver.
 #[cfg(target_arch = "riscv64")]
-static mut KEYBOARD: Option<virtio_drivers::VirtIOInput<crate::allocator::HalImpl, virtio_drivers::MmioTransport>> = None;
-
-/// Keyboard MMIO base address for queue notify workaround.
-#[cfg(target_arch = "riscv64")]
-static mut KBD_MMIO_ADDR: usize = 0;
+static mut KEYBOARD: Option<virtio_drivers::device::input::VirtIOInput<crate::allocator::HalImpl, virtio_drivers::transport::mmio::MmioTransport>> = None;
 
 /// 应用程序名称到 ELF 数据的映射表
 ///
@@ -267,7 +263,6 @@ extern "C" fn rust_main() -> ! {
             GPU = Some(gpu_driver);
             FRAMEBUFFER = Some(fb_info);
             KEYBOARD = devices.keyboard;
-            KBD_MMIO_ADDR = devices.kbd_mmio_addr;
         }
     }
     // 步骤 8：加载初始进程 initproc
@@ -746,15 +741,11 @@ mod impls {
                                 (*p).as_mut()
                             };
                             if let Some(kbd) = keyboard {
-                                let mmio = unsafe { crate::KBD_MMIO_ADDR };
                                 // Drain non-keypress events (syncs, releases) until we
                                 // find an actual key-down or exhaust the queue.
                                 loop {
                                     match kbd.pop_pending_event() {
                                         Some(event) => {
-                                            // Notify device that buffer is re-available
-                                            // (workaround: virtio-drivers 0.1.0 bug)
-                                            crate::virtio::kbd_notify(mmio);
                                             if event.event_type == 1 && event.value == 1 && event.code < 256 {
                                                 unsafe { *ptr.as_mut() = event.code as u8 };
                                                 return 1;

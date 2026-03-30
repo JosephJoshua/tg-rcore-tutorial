@@ -38,7 +38,7 @@ tg-kernel-alloc = { package = "tg-rcore-tutorial-kernel-alloc", path = "../tg-rc
 tg-kernel-vm = { package = "tg-rcore-tutorial-kernel-vm", path = "../tg-rcore-tutorial-kernel-vm", version = "0.4.8" }
 tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
 tg-task-manage = { package = "tg-rcore-tutorial-task-manage", path = "../tg-rcore-tutorial-task-manage", version = "0.4.8", features = ["proc"] }
-virtio-drivers = "0.1.0"
+virtio-drivers = "0.3.0"
 
 [build-dependencies]
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }

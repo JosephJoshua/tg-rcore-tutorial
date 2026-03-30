@@ -2,7 +2,13 @@
 
 use crate::allocator::HalImpl;
 use core::ptr::NonNull;
-use virtio_drivers::{DeviceType, MmioTransport, Transport, VirtIOGpu, VirtIOHeader, VirtIOInput};
+use virtio_drivers::{
+    device::{gpu::VirtIOGpu, input::VirtIOInput},
+    transport::{
+        mmio::{MmioTransport, VirtIOHeader},
+        DeviceType, Transport,
+    },
+};
 
 const VIRTIO_MMIO_BASE: usize = 0x10001000;
 const VIRTIO_MMIO_END: usize = 0x10008000;
@@ -26,27 +32,12 @@ pub struct VirtIODevices {
     pub gpu: (VirtIOGpu<'static, HalImpl, MmioTransport>, Framebuffer),
     /// Optional keyboard input driver.
     pub keyboard: Option<VirtIOInput<HalImpl, MmioTransport>>,
-    /// Keyboard MMIO base address (for queue notify workaround).
-    pub kbd_mmio_addr: usize,
-}
-
-/// Notify the VirtIO keyboard device that new buffers are available on queue 0.
-/// Workaround for virtio-drivers 0.1.0 bug: pop_pending_event() re-adds buffers
-/// to the available ring but never notifies the device.
-/// queue_notify register is at MMIO offset 0x50.
-pub fn kbd_notify(mmio_addr: usize) {
-    if mmio_addr != 0 {
-        unsafe {
-            core::ptr::write_volatile((mmio_addr + 0x50) as *mut u32, 0);
-        }
-    }
 }
 
 /// Scan all VirtIO MMIO slots, initialize GPU and keyboard devices.
 pub fn init() -> VirtIODevices {
     let mut gpu_transport: Option<MmioTransport> = None;
     let mut kbd_transport: Option<MmioTransport> = None;
-    let mut kbd_mmio: usize = 0;
 
     let mut addr = VIRTIO_MMIO_BASE;
     while addr <= VIRTIO_MMIO_END {
@@ -60,7 +51,6 @@ pub fn init() -> VirtIODevices {
                 DeviceType::Input => {
                     tg_console::log::info!("found VirtIO Input at {addr:#x}");
                     kbd_transport = Some(transport);
-                    kbd_mmio = addr;
                 }
                 other => {
                     tg_console::log::debug!("skipping VirtIO device type {other:?} at {addr:#x}");
@@ -84,5 +74,5 @@ pub fn init() -> VirtIODevices {
         tg_console::log::warn!("no VirtIO keyboard device found");
     }
 
-    VirtIODevices { gpu: (gpu, fb), keyboard, kbd_mmio_addr: kbd_mmio }
+    VirtIODevices { gpu: (gpu, fb), keyboard }
 }
