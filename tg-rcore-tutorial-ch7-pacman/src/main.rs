@@ -54,6 +54,9 @@ mod process;
 mod processor;
 /// VirtIO 块设备驱动
 mod virtio_block;
+/// DMA bump allocator for virtio-drivers v0.3.0
+#[cfg(target_arch = "riscv64")]
+mod allocator;
 
 #[macro_use]
 extern crate tg_console;
