@@ -142,74 +142,178 @@ Keycodes:
 ## Pac-Man Game Design
 
 ### Maze
+
 - 1280x800 framebuffer
-- Grid-based maze: 28 columns x 31 rows (classic Pac-Man proportions)
-- Cell size: 24x24 pixels
-- Maze area: 672x744 pixels, centered horizontally
-- Maze defined as a static byte array: 0=wall, 1=dot, 2=power pellet, 3=empty path, 4=ghost house
-- Walls rendered as dark blue, paths as black, dots as small white squares (4x4), power pellets as larger circles (8x8, flashing)
+- Grid: 21 columns x 21 rows (simplified from classic 28x31 — still fun, less implementation)
+- Cell size: 28x28 pixels
+- Maze area: 588x588 pixels, centered in the left 2/3 of the screen
+- Right 1/3: HUD panel (score, high score, lives, level, ghost status)
+- Maze defined as `static MAZE: [u8; 21*21]` — cell types: `W`=wall, `D`=dot, `P`=power pellet, `E`=empty, `G`=ghost house, `T`=tunnel entrance
 
-### Pac-Man
-- Size: 20x20 pixels (fits in 24x24 cell)
-- Yellow color
-- Moves one cell per N ticks (grid-snapped movement)
-- Direction queued from keyboard input, applied at next grid intersection
-- Eats dots/pellets on contact
+**Concrete maze layout** (21x21, symmetric, fun corridors):
+```
+WWWWWWWWWWWWWWWWWWWWW
+WDDDDDDDDDWDDDDDDDDDW  <- note: W=wall wraps left/right edges
+WDWWWDWWWDWDWWWDWWWDW
+WPWWWDWWWDWDWWWDWWWPW  <- P = power pellets in corners
+WDDDDDDDDDDDDDDDDDDDW
+WDWWWDWDWWWWWDWDWWWDW
+WDDDDDWDDDWDDDWDDDDDW
+WWWWWDWWWEWDWWWDWWWWW
+EEEEEWDEEEEEEDWEEEEEE  <- tunnel row (wraps left<->right)
+WWWWWDWEWGGEWDWDWWWWW  <- G = ghost house (center)
+TEEEEDEEGEGEDEEDEEEET  <- T = tunnel exits
+WWWWWDWEWGGEWDWDWWWWW
+EEEEEWDEEEEEEDWEEEEEE  <- second tunnel row
+WWWWWDWDWWWWWDWDWWWWW
+WDDDDDDDDDWDDDDDDDDDW
+WDWWWDWWWDWDWWWDWWWDW
+WPDDWDDDDDEDDDDWDDPW  <- E in center = Pac-Man start
+WWDWWDWDWWWWWDWDWWDWW
+WDDDDDWDDDWDDDWDDDDDW
+WDWWWWWWWDWDWWWWWWWDW
+WDDDDDDDDDDDDDDDDDDDW
+WWWWWWWWWWWWWWWWWWWWW
+```
 
-### Ghosts (2-4)
-- Size: 20x20 pixels
-- Different colors: red (Blinky), pink (Pinky), cyan (Inky), orange (Clyde)
-- Each runs as a **separate child process**
-- Movement via pipe IPC: parent sends state, ghost sends direction
-- AI behavior cycles between Chase and Scatter modes
+This is a schematic — the actual byte array encodes cell types numerically. Key features:
+- **Two tunnel passages** (rows 9 and 13): Pac-Man/ghosts exiting left reappear on right (and vice versa). Ghosts slow to half speed in tunnels.
+- **Ghost house** (center, 4x2 cells): ghosts spawn here. A gate cell at the top center lets ghosts exit one at a time.
+- **4 power pellets** in near-corner positions
+- **Pac-Man starts** at the center below the ghost house
+- **Symmetrical** left-right for fair gameplay
 
-### Dots and Power Pellets
-- Small dots: 4x4 white, 10 points each
-- Power pellets: 8x8, placed at 4 corners, 50 points each
-- Eating a power pellet: parent sends SIGUSR1 to all ghost children. Ghosts enter frightened mode (random movement, blue color) for ~5 seconds.
-- Eating a frightened ghost: 200 points, ghost resets to ghost house
+### Pac-Man Movement
+
+- **Grid-snapped**: Pac-Man is always aligned to cell centers. Movement is one full cell per game tick.
+- **Direction queuing**: player presses a direction key, it's stored as `queued_dir`. At each tick, if Pac-Man can move in `queued_dir` (no wall), adopt it as `current_dir`. Otherwise keep moving in `current_dir`. If `current_dir` is also blocked (wall), stop.
+- **Cornering feel**: this input buffering is what makes classic Pac-Man feel responsive — you can pre-press a turn before reaching the intersection.
+- **Speed**: 1 cell per tick. Tick rate ~8 ticks/second (using `get_time()` with 125ms interval). This gives a comfortable pace.
+- **Tunnel wrap**: when Pac-Man's x goes below 0, wrap to column 20. Above 20, wrap to column 0. Only on tunnel rows.
+
+### Ghosts — 4 with Distinct Personalities
+
+Each ghost runs as a **child process** and has a unique AI that makes the game feel dynamic and unpredictable:
+
+| Ghost | Color | Name | Chase Target | Personality |
+|-------|-------|------|-------------|-------------|
+| 0 | Red | Blinky | Pac-Man's current cell | **Aggressive chaser**. Always targets Pac-Man directly. Gets faster when few dots remain ("Cruise Elroy" behavior: when <20 dots left, moves every tick instead of every other tick). |
+| 1 | Pink | Pinky | 4 cells ahead of Pac-Man | **Ambusher**. Targets the cell 4 positions ahead of Pac-Man in Pac-Man's current direction. Often cuts off escape routes. |
+| 2 | Cyan | Inky | Complex offset from Blinky | **Unpredictable**. Target = take the cell 2 ahead of Pac-Man, draw a vector from Blinky to that cell, double it. This creates erratic movement that's hard to predict. In the simplified version: alternate between chasing Pac-Man and running to a random dot. |
+| 3 | Orange | Clyde | Pac-Man or corner | **Shy**. Chases Pac-Man when far away (>8 cells Manhattan distance), but runs to his scatter corner when close. Creates a push-pull dynamic. |
+
+**Ghost AI modes** (cycle during gameplay):
+
+1. **Scatter** (7 seconds): each ghost targets its assigned corner. Gives the player breathing room.
+   - Blinky: top-right, Pinky: top-left, Inky: bottom-right, Clyde: bottom-left
+2. **Chase** (20 seconds): each ghost uses its unique targeting algorithm.
+3. **Repeat**: scatter → chase → scatter → chase, with scatter periods getting shorter each cycle (7s, 7s, 5s, 5s, then permanent chase)
+
+**Frightened mode** (triggered by power pellet via SIGUSR1):
+- All ghosts reverse direction immediately
+- Move randomly at intersections (pick a random valid direction)
+- Move at half speed (skip every other tick)
+- Duration: 6 seconds on level 1, decreasing by 1 second per level, minimum 1 second
+- When time is almost up (last 2 seconds): ghosts flash white/blue alternately (warning)
+- If eaten: ghost "eyes" return to ghost house at double speed, then respawn
+
+**Ghost house release timing** (staggered):
+- Blinky: starts outside, immediately active
+- Pinky: released after 3 seconds
+- Inky: released after 10 seconds (or when 30 dots eaten)
+- Clyde: released after 20 seconds (or when 80 dots eaten)
+
+**Ghost pathfinding**: at each intersection, ghost picks the direction (excluding reverse of current direction) that puts it closest to its target cell (Manhattan distance). If tied, preference order: up > left > down > right. This is the classic Pac-Man pathfinding and creates predictable-but-complex emergent behavior.
+
+### Dots, Power Pellets, and Fruit
+
+- **Dots**: 4x4 bright pixels at cell center. ~180 dots total. 10 points each. Pac-Man eats on contact (same cell).
+- **Power pellets**: 10x10 pixels, pulsing (drawn every other half-second for a blink effect). 4 placed near corners. 50 points each. Triggers SIGUSR1 to all ghosts on eat.
+- **Fruit bonus**: a bonus item appears at the center (Pac-Man's start position) twice per level — once after 70 dots eaten, again after 170 dots eaten. Stays for 10 seconds, then disappears.
+  - Level 1: cherry (100 pts), Level 2: strawberry (300 pts), Level 3+: orange (500 pts)
+  - Rendered as a colored square with a small stem (simple pixel art)
+- **Ghost eat combo**: eating multiple ghosts during one power pellet gives escalating points: 200, 400, 800, 1600. Resets when power pellet expires.
 
 ### Collision Detection
-- Grid-based: check if Pac-Man and ghost occupy the same cell
-- Normal ghost: Pac-Man loses a life (ghost sends SIGUSR2 to parent)
-- Frightened ghost: ghost is eaten (200 points, ghost respawns)
 
-### Lives & Scoring
-- 3 lives
-- Dots: 10 points, Power pellets: 50 points, Ghosts: 200 points
-- All dots cleared: next level (reset dots, increase ghost speed, keep score)
-- All lives lost: game over, save high score if new record
-- High score saved to filesystem via open/write/close
+- **Grid-based**: every tick, check if Pac-Man and any ghost occupy the same cell (or swapped cells — moving through each other)
+- **Normal ghost → Pac-Man**: life lost. Freeze for 1 second (death animation: Pac-Man shrinks). All ghosts reset to ghost house. Pac-Man respawns at start. Dots are NOT reset.
+- **Frightened ghost → Pac-Man**: ghost eaten. Show points at that location for 0.5 seconds. Ghost eyes return to ghost house. Ghost respawns in house after 3 seconds.
+- **Collision is checked by parent process** (it knows all positions). Parent sends SIGUSR1 (power pellet) proactively. For ghost-catches-Pac-Man, parent detects it directly (no SIGUSR2 needed from ghost — simpler than having the ghost detect it, since the parent has all the state).
+
+Note: the original prompt suggested SIGUSR2 from ghost→parent for collisions, but since the parent knows all positions, it's cleaner to detect collisions in the parent and use signals only for the power pellet broadcast. This still demonstrates both `kill()` (parent→ghosts) and signal handlers in the ghosts.
+
+### Lives, Scoring, and Levels
+
+- **3 lives** (can earn extra life at 10,000 points)
+- **Score display**: top of HUD panel, large 7-segment digits
+- **High score**: displayed below current score. Loaded from filesystem at game start, saved when beaten.
+- **Level progression**:
+  - All dots + power pellets eaten → level complete
+  - Brief celebration flash (maze flashes white 3 times over 2 seconds)
+  - Reset dots and power pellets, keep score and lives
+  - Ghost speed increases: base tick interval decreases by 10ms per level (125ms → 115ms → 105ms, minimum 70ms)
+  - Frightened duration decreases: 6s → 5s → 4s → 3s → 2s → 1s
+  - Ghosts are released from house faster each level
+- **Game over**: when all lives lost, display "GAME OVER" in center of maze for 3 seconds. If score > high score, save to filesystem. Show final score. Any key restarts.
+
+### HUD Panel (right side)
+
+Positioned to the right of the maze (x ≈ 700..1200):
+- **"SCORE"** label + large score digits
+- **"HIGH"** label + high score digits
+- **Level number**
+- **Lives remaining**: shown as small Pac-Man icons (yellow circles)
+- **Current fruit icon** for the level
+- **Ghost status indicators**: colored dots showing which ghosts are active/frightened/eaten
+
+### Game States
+
+| State | Description | Transitions |
+|-------|-------------|-------------|
+| READY | "READY!" text in maze center, 2-second countdown | → PLAYING (auto) |
+| PLAYING | Normal gameplay, all systems active | → DYING, LEVEL_COMPLETE, GAME_OVER |
+| DYING | Pac-Man death animation (1 second), freeze all | → PLAYING (if lives > 0), GAME_OVER |
+| LEVEL_COMPLETE | Maze flashes (2 seconds) | → READY (next level) |
+| GAME_OVER | "GAME OVER" display, save high score | → READY (any key) |
+| PAUSED | Freeze all, "PAUSED" text | → PLAYING (Space) |
 
 ### Signal Usage
 
 | Signal | Sender | Receiver | Purpose |
 |--------|--------|----------|---------|
 | SIGUSR1 (10) | Parent | All ghosts | Power pellet eaten — enter frightened mode |
-| SIGUSR2 (12) | Ghost | Parent | Ghost caught Pac-Man — lose a life |
+| SIGUSR2 (12) | Parent | Specific ghost | Ghost was eaten — return to ghost house |
 
-Ghost signal handler for SIGUSR1:
+Collisions are detected by the parent (it knows all positions). Signals flow parent→ghost only, which is simpler and avoids race conditions.
+
+Ghost signal handler for SIGUSR1 (power pellet):
 ```rust
 // In ghost child process:
-fn handle_sigusr1() {
-    // Set a flag that the ghost AI loop checks
-    unsafe { FRIGHTENED = true; }
-    unsafe { FRIGHTENED_TIMER = 300; } // ~5 seconds worth of ticks
+static mut FRIGHTENED_TICKS: u32 = 0;
+fn handle_power_pellet() {
+    unsafe { FRIGHTENED_TICKS = 48; } // ~6 seconds at 8 ticks/sec
 }
-sigaction(10, &SignalAction { handler: handle_sigusr1 as usize, mask: 0 });
+sigaction(10, &SignalAction { handler: handle_power_pellet as usize, mask: 0 });
 ```
 
-Parent signal handler for SIGUSR2:
+Ghost signal handler for SIGUSR2 (eaten — return to house):
 ```rust
-fn handle_sigusr2() {
-    unsafe { LIFE_LOST = true; }
+static mut RESPAWNING: bool = false;
+fn handle_eaten() {
+    unsafe { RESPAWNING = true; }
 }
-sigaction(12, &SignalAction { handler: handle_sigusr2 as usize, mask: 0 });
+sigaction(12, &SignalAction { handler: handle_eaten as usize, mask: 0 });
 ```
+
+The ghost's main loop checks these flags:
+- If `FRIGHTENED_TICKS > 0`: use random movement, decrement counter each tick
+- If `RESPAWNING`: target ghost house, move at double speed, ignore walls on the path back. Once home, wait 3 seconds, then respawn.
 
 ### Pipe Communication Detail
 
-Per ghost, two pipes:
+Per ghost, two pipes (8 pipe fds per ghost × 4 ghosts = 32 fds, well within fd_table capacity):
+
 ```
 parent_to_ghost: pipe() -> [read_fd, write_fd]
   - Parent keeps write_fd, closes read_fd
@@ -220,35 +324,53 @@ ghost_to_parent: pipe() -> [read_fd, write_fd]
   - Parent keeps read_fd, closes write_fd
 ```
 
-After fork, each process closes the pipe ends it doesn't use. This ensures EOF detection works correctly (when parent closes write end, ghost's read returns 0).
+After fork, each process closes the pipe ends it doesn't use. This ensures EOF detection works (when parent exits, ghost's read returns 0 → ghost exits cleanly).
 
-Each tick:
-1. Parent writes 5 bytes to each ghost's input pipe: `[pac_x, pac_y, ghost_x, ghost_y, mode]`
-2. Parent reads 1 byte from each ghost's output pipe: `[direction]`
-3. Ghost reads 5 bytes from its input pipe, runs AI, writes 1 byte to its output pipe
+**Per-tick protocol** (lockstep synchronization):
+
+```rust
+// Parent sends to each ghost (7 bytes):
+struct GhostInput {
+    pac_x: u8,        // Pac-Man grid column
+    pac_y: u8,        // Pac-Man grid row
+    pac_dir: u8,      // Pac-Man direction (for Pinky's look-ahead)
+    ghost_x: u8,      // This ghost's grid column
+    ghost_y: u8,      // This ghost's grid row
+    blinky_x: u8,     // Blinky's position (for Inky's algorithm)
+    blinky_y: u8,     // Blinky's position
+}
+
+// Ghost responds (1 byte):
+//   0=up, 1=right, 2=down, 3=left
+```
+
+Tick flow:
+1. Parent updates game state (move Pac-Man, check dots/collisions)
+2. Parent writes 7 bytes to each ghost's input pipe
+3. Parent reads 1 byte from each ghost's output pipe (**blocks until ghost responds** — natural synchronization)
+4. Parent applies ghost movements, renders frame, flushes
+5. Each ghost: reads 7 bytes (**blocks until parent writes**), runs AI, writes 1 byte direction
+
+This creates a clean lockstep: parent and ghosts alternate in sync. No need for shared memory or explicit synchronization. The pipe's blocking read/write IS the synchronization mechanism.
 
 ### Rendering
-- **Incremental**: only redraw changed cells (eaten dots, moved characters)
-- **Full redraw on level start**: draw entire maze, all dots, characters
-- **Color scheme**: Neon arcade style (dark background, bright characters)
-  - Walls: deep blue with glow (#0000AA with #000044 glow)
-  - Dots: warm white
-  - Power pellets: bright white, flashing
-  - Pac-Man: neon yellow
-  - Blinky: neon red, Pinky: neon pink, Inky: neon cyan, Clyde: neon orange
-  - Frightened ghosts: blue with white
-  - Score/lives: neon green HUD at top
-- **Maze rendering**: each wall cell drawn as a filled rectangle. Path cells drawn as black.
 
-### Simplified Maze Layout (28x31)
-
-Use a simplified maze that captures the classic feel:
-- Outer walls, internal corridors
-- Ghost house in center (4x2 cells with a gate)
-- 4 power pellets near corners
-- Symmetrical left-right
-
-Encode as a static `[u8; 28*31]` array where each byte is the cell type.
+- **Incremental**: only redraw changed cells (eaten dot → black, moved character → erase old + draw new)
+- **Full redraw** on level start, game restart, and after load
+- **Color scheme**: Neon arcade (consistent with ch4-tetris, ch5-pingpong, ch6-breakout)
+  - Background (outside maze): deep void #040612
+  - Walls: deep blue #0000CC with #000044 glow border (draw wall cell as a filled blue rect with 1px darker outline)
+  - Paths: black #000000
+  - Dots: warm yellow-white #FFEEAA, 4x4 at cell center
+  - Power pellets: bright white #FFFFFF, 10x10, pulsing (draw/erase every 500ms)
+  - Pac-Man: neon yellow #FFE000, 20x20 filled square (simple — no mouth animation needed)
+  - Blinky: #FF0000 red, Pinky: #FFB8FF pink, Inky: #00FFFF cyan, Clyde: #FFB852 orange
+  - Frightened ghosts: #2222FF blue body, #FFFFFF white eyes. Flash white/blue in last 2 seconds.
+  - Eaten ghost (eyes only): two white 4x4 squares where eyes would be, moving toward ghost house
+  - Score/lives HUD: neon green #00FF66 text (7-segment digits)
+- **Character rendering**: each character is a filled colored square (20x20) with 2x2 "eye" dots for ghosts. Simple but readable at VNC resolution.
+- **Death animation**: Pac-Man shrinks from 20x20 → 16x16 → 12x12 → 8x8 → 4x4 → gone over 1 second (erase and redraw smaller each 200ms).
+- **Level complete animation**: alternate maze walls between blue and white, 3 times over 2 seconds.
 
 ## Lessons Learned from ch1-ch6 (apply ALL of these)
 
@@ -262,7 +384,7 @@ Encode as a static `[u8; 28*31]` array where each byte is the cell type.
 
 5. **Single keyboard reader** — Only one process should read the VirtIO keyboard (there's one event queue). Parent reads all input, dispatches to children via pipes/shared memory.
 
-6. **IO::read fd=0 must stay blocking for shell** — Use fd 0 (STDIN) for blocking SBI console reads (shell needs this). Use fd 3 (STDIN_BUFFERED) for non-blocking VirtIO keyboard (game uses this). Don't break the fd dispatch for pipes (fd 3+ might be pipe fds — check the Fd enum type).
+6. **IO::read and the fd conflict** — In ch5/ch6, fd 3 (STDIN_BUFFERED) was used for non-blocking VirtIO keyboard. But in ch7, fd 3+ are used for pipes! The `Fd` enum dispatches read/write based on type (File, PipeRead, PipeWrite, Empty). For keyboard: add a new `Fd::Keyboard` variant, or use a dedicated high fd number (e.g., 100) that won't conflict with pipe allocations, or use `Fd::Empty` for fd 0 and make it poll VirtIO keyboard instead of SBI. The cleanest approach: when `Fd::Empty { read: true }` is read (which is stdin), try VirtIO keyboard first (non-blocking), then fall back to SBI console. The shell gets SBI input via serial, the game gets VirtIO keyboard events. Pipe fds are `Fd::PipeRead` and work unchanged.
 
 7. **MEMORY = 70 MiB** — Large kernel image (embedded user programs) + GPU framebuffer + process page tables.
 
@@ -303,17 +425,22 @@ Encode as a static `[u8; 28*31]` array where each byte is the cell type.
 ## Acceptance Criteria
 
 1. `cargo run` opens QEMU with a playable simplified Pac-Man game on VNC
-2. Pac-Man moves with WASD/arrow keys, eats dots and power pellets
-3. 2-4 ghost child processes communicate via pipes (verified by PID prints at startup)
-4. Ghosts chase Pac-Man using AI, with different behaviors
-5. Power pellet triggers SIGUSR1 to ghosts — they turn blue/frightened
-6. Ghost-Pac-Man collision triggers SIGUSR2 to parent — life lost
-7. Score, lives, level displayed on screen
-8. High score saved to filesystem (persists across restarts)
-9. Game over when all lives lost, Enter restarts
-10. Level progression when all dots cleared
-11. Existing ch7 test programs still pass (serial output correct)
-12. `cargo check` and `cargo publish --dry-run` pass
+2. Pac-Man moves with WASD/arrow keys with direction queuing (responsive cornering)
+3. 4 ghost child processes communicate via pipes (verified by PID prints at startup)
+4. Each ghost has distinct AI personality (Blinky chases, Pinky ambushes, Inky is erratic, Clyde is shy)
+5. Ghost modes cycle: scatter (7s) → chase (20s) → repeat
+6. Power pellet triggers SIGUSR1 to ghosts — they turn blue, move randomly, can be eaten for escalating points (200/400/800/1600)
+7. Eaten ghosts return to ghost house as "eyes" then respawn
+8. Tunnel wrap-around works (ghosts slow in tunnels)
+9. Fruit bonus appears twice per level at the center
+10. Score, high score, lives, level displayed in HUD panel
+11. High score saved to filesystem (persists across restarts via open/write/close)
+12. Death animation (Pac-Man shrinks), 1-second freeze, then continue/game over
+13. Level progression when all dots cleared (maze flashes, ghosts get faster)
+14. Game over when all lives lost, high score saved, any key restarts
+15. Space pauses/unpauses the game
+16. Existing ch7 test programs still pass (serial output correct)
+17. `cargo check` and `cargo publish --dry-run` pass
 
 ## Workflow
 
