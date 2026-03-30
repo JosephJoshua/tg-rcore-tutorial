@@ -391,3 +391,31 @@ cases = [
     "sbrk",
     "tetris",
 ]
+
+[ch6_breakout]
+cases = [
+    "00hello_world",
+    "01store_fault",
+    "02power",
+    "03priv_inst",
+    "04priv_csr",
+    "05write_a",
+    "06write_b",
+    "07write_c",
+    "08power_3",
+    "09power_5",
+    "10power_7",
+    "12forktest",
+    "13forktree",
+    "14forktest2",
+    "15matrix",
+    "fork_exit",
+    "forktest_simple",
+    "sbrk",
+    "filetest_simple",
+    "cat_filea",
+    "ch6b_usertest",
+    "user_shell",
+    "initproc",
+    "breakout",
+]

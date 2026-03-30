@@ -26,6 +26,9 @@ pub mod tetris;
 #[cfg(feature = "pingpong")]
 pub mod pingpong;
 
+#[cfg(feature = "breakout")]
+pub mod breakout;
+
 /// Query framebuffer dimensions from kernel.
 /// Returns (width, height).
 pub fn fb_info() -> (u32, u32) {
@@ -43,7 +46,7 @@ pub fn fb_info() -> (u32, u32) {
 }
 
 /// Write a rectangular BGRA pixel region to the kernel framebuffer.
-/// The kernel copies the data and flushes the display.
+/// Does NOT flush — call `fb_flush()` after all writes for the frame.
 pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
     let ret: isize;
     unsafe {
@@ -60,17 +63,6 @@ pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
     ret
 }
 
-/// Flush the GPU display. Call once per frame after all fb_write calls.
-pub fn fb_flush() {
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a7") 2003usize,
-            lateout("a0") _,
-        );
-    }
-}
-
 /// Request a shared memory page from the kernel.
 /// Returns the virtual address of the shared page, or usize::MAX on failure.
 pub fn shm_create() -> usize {
@@ -85,6 +77,17 @@ pub fn shm_create() -> usize {
     ret
 }
 
+/// Flush the GPU framebuffer to the display.
+/// Call once per frame after all fb_write calls.
+pub fn fb_flush() {
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2003usize,
+            lateout("a0") _,
+        );
+    }
+}
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 pub extern "C" fn _start() -> ! {
@@ -119,8 +122,13 @@ pub const STDIN_BUFFERED: usize = 3;
 
 pub fn getchar() -> u8 {
     let mut c = [0u8; 1];
-    read(STDIN, &mut c);
-    c[0]
+    loop {
+        let n = read(STDIN, &mut c);
+        if n > 0 && c[0] != 0 {
+            return c[0];
+        }
+        sched_yield();
+    }
 }
 
 struct Console;

@@ -32,5 +32,6 @@ tangram = []
 snake = []
 tetris = []
 pingpong = []
+breakout = []
 
 [workspace]
