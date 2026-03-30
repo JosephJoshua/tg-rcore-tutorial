@@ -59,7 +59,6 @@ mod virtio_block;
 mod allocator;
 /// VirtIO GPU and keyboard driver module
 #[cfg(target_arch = "riscv64")]
-#[allow(dead_code)]
 mod virtio;
 
 #[macro_use]
@@ -95,6 +94,11 @@ use tg_signal::SignalResult;
 use tg_syscall::Caller;
 use tg_task_manage::{PManager, ProcId};
 use xmas_elf::ElfFile;
+#[cfg(target_arch = "riscv64")]
+use virtio_drivers::{
+    device::{gpu::VirtIOGpu, input::VirtIOInput},
+    transport::mmio::MmioTransport,
+};
 
 /// 构建 VmFlags（虚拟内存标志位）。
 #[cfg(target_arch = "riscv64")]
@@ -133,8 +137,8 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-/// 物理内存容量 = 48 MiB
-const MEMORY: usize = 48 << 20;
+/// 物理内存容量 = 70 MiB
+const MEMORY: usize = 70 << 20;
 
 /// 异界传送门所在虚页（虚拟地址空间最高页）
 const PROTAL_TRANSIT: VPN<Sv39> = VPN::MAX;
@@ -168,7 +172,29 @@ impl KernelSpace {
 static KERNEL_SPACE: KernelSpace = KernelSpace::new();
 
 /// VirtIO MMIO 设备地址范围
-pub const MMIO: &[(usize, usize)] = &[(0x1000_1000, 0x00_1000)];
+pub const MMIO: &[(usize, usize)] = &[
+    (0x1000_0000, 0x00_9000),   // VirtIO MMIO range (blk + GPU + keyboard)
+    (0x8500_0000, 0x0050_0000), // DMA pool for VirtIO GPU
+];
+
+/// Custom syscall IDs for framebuffer operations.
+const SYSCALL_FB_INFO: usize = 2000;
+/// Write pixels to framebuffer.
+const SYSCALL_FB_WRITE: usize = 2001;
+/// Flush GPU display.
+const SYSCALL_FB_FLUSH: usize = 2003;
+
+/// Global GPU driver.
+#[cfg(target_arch = "riscv64")]
+static mut GPU: Option<VirtIOGpu<'static, allocator::HalImpl, MmioTransport>> = None;
+
+/// Global framebuffer info.
+#[cfg(target_arch = "riscv64")]
+static mut FRAMEBUFFER: Option<virtio::Framebuffer> = None;
+
+/// Global keyboard driver.
+#[cfg(target_arch = "riscv64")]
+static mut KEYBOARD: Option<VirtIOInput<allocator::HalImpl, MmioTransport>> = None;
 
 /// 内核主函数——系统初始化和启动入口
 ///
@@ -207,6 +233,17 @@ extern "C" fn rust_main() -> ! {
     assert!(portal_layout.size() < 1 << Sv39::PAGE_BITS);
     // 步骤 5：建立内核地址空间并激活 Sv39 分页
     kernel_space(layout, MEMORY, portal_ptr as _);
+    // Initialize VirtIO GPU and keyboard devices
+    #[cfg(target_arch = "riscv64")]
+    {
+        let devices = virtio::init();
+        let (gpu_driver, fb_info) = devices.gpu;
+        unsafe {
+            GPU = Some(gpu_driver);
+            FRAMEBUFFER = Some(fb_info);
+            KEYBOARD = devices.keyboard;
+        }
+    }
     // 步骤 6：初始化异界传送门
     let portal = unsafe { MultislotPortal::init_transit(PROTAL_TRANSIT.base().val(), 1) };
     // 步骤 7：初始化系统调用处理器
@@ -241,6 +278,30 @@ extern "C" fn rust_main() -> ! {
                     ctx.move_next();
                     let id: Id = ctx.a(7).into();
                     let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
+                    let id_num: usize = ctx.a(7);
+                    // Handle FB syscalls before normal dispatch
+                    #[cfg(target_arch = "riscv64")]
+                    match id_num {
+                        SYSCALL_FB_INFO => {
+                            let ret = handle_fb_info();
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_FB_WRITE => {
+                            let ret = handle_fb_write(args[0], args[1], args[2], args[3], args[4]);
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_FB_FLUSH => {
+                            let ret = handle_fb_flush();
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        _ => {}
+                    }
                     let syscall_ret = tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args);
 
                     // ─── 本章新增：信号处理 ───
@@ -351,6 +412,100 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
 fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
     let portal_idx = PROTAL_TRANSIT.index_in(Sv39::MAX_LEVEL);
     space.root()[portal_idx] = unsafe { KERNEL_SPACE.assume_init_ref() }.root()[portal_idx];
+}
+
+/// Translate a VirtIO keycode — pass through raw keycodes.
+fn translate_keycode(code: u16) -> u8 {
+    match code {
+        17 => 17, 30 => 30, 31 => 31, 32 => 32,  // WASD
+        103 => 103, 105 => 105, 106 => 106, 108 => 108,  // arrows
+        57 => 57, 28 => 28, 63 => 63,  // space, enter, F5
+        _ => code as u8,
+    }
+}
+
+/// Poll VirtIO keyboard. Returns keycode for press, keycode|0x80 for release.
+#[cfg(target_arch = "riscv64")]
+fn keyboard_trygetchar() -> Option<u8> {
+    let kbd = unsafe {
+        let p = &raw mut KEYBOARD;
+        (*p).as_mut()
+    }?;
+    loop {
+        match kbd.pop_pending_event() {
+            Some(event) => {
+                if event.event_type == 1 {
+                    let keycode = translate_keycode(event.code);
+                    if event.value == 1 {
+                        return Some(keycode);
+                    } else if event.value == 0 {
+                        return Some(keycode | 0x80);
+                    }
+                }
+            }
+            None => return None,
+        }
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_info() -> usize {
+    let (width, height) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.width, fb.height)
+    };
+    ((width as usize) << 32) | (height as usize)
+}
+
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> usize {
+    use tg_kernel_vm::page_table::VmFlags;
+
+    let (fb_ptr, fb_len, fb_w, fb_h) = unsafe {
+        let p = &raw const FRAMEBUFFER;
+        let fb = (*p).as_ref().expect("GPU not initialized");
+        (fb.ptr, fb.len, fb.width as usize, fb.height as usize)
+    };
+
+    if x + w > fb_w || y + h > fb_h || w == 0 || h == 0 {
+        return usize::MAX;
+    }
+
+    let fb_buf = unsafe { core::slice::from_raw_parts_mut(fb_ptr, fb_len) };
+
+    const READABLE: VmFlags<Sv39> = build_flags("RV");
+    let current = PROCESSOR.get_mut().current().unwrap();
+
+    for row in 0..h {
+        let row_va = data_ptr + row * w * 4;
+        if let Some(ptr) = current.address_space.translate::<u8>(VAddr::new(row_va), READABLE) {
+            let user_row = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), w * 4) };
+            for col in 0..w {
+                let src_off = col * 4;
+                let alpha = user_row[src_off + 3];
+                if alpha == 0 { continue; }
+                let fb_off = ((y + row) * fb_w + (x + col)) * 4;
+                fb_buf[fb_off] = user_row[src_off];
+                fb_buf[fb_off + 1] = user_row[src_off + 1];
+                fb_buf[fb_off + 2] = user_row[src_off + 2];
+                fb_buf[fb_off + 3] = user_row[src_off + 3];
+            }
+        } else {
+            return usize::MAX;
+        }
+    }
+    0
+}
+
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_flush() -> usize {
+    let gpu = unsafe {
+        let p = &raw mut GPU;
+        (*p).as_mut().expect("GPU not initialized")
+    };
+    gpu.flush().expect("GPU flush failed");
+    0
 }
 
 /// 各种接口库的实现
@@ -511,15 +666,18 @@ mod impls {
             let current = PROCESSOR.get_mut().current().unwrap();
             if let Some(ptr) = current.address_space.translate(VAddr::new(buf), WRITEABLE) {
                 if fd == STDIN {
-                    // 标准输入：通过 SBI 逐字符读取
-                    let mut ptr = ptr.as_ptr();
-                    for _ in 0..count {
-                        unsafe {
-                            *ptr = tg_sbi::console_getchar() as u8;
-                            ptr = ptr.add(1);
+                    #[cfg(target_arch = "riscv64")]
+                    {
+                        match crate::keyboard_trygetchar() {
+                            Some(ch) => {
+                                unsafe { *ptr.as_ptr() = ch; }
+                                1
+                            }
+                            None => 0,
                         }
                     }
-                    count as _
+                    #[cfg(not(target_arch = "riscv64"))]
+                    { -1 }
                 } else if let Some(file) = &current.fd_table[fd] {
                     // 普通文件或管道：通过 Fd 统一接口读取
                     let file = file.lock();
