@@ -172,6 +172,8 @@ const SYSCALL_FB_INFO: usize = 2000;
 const SYSCALL_FB_WRITE: usize = 2001;
 /// Create shared memory page.
 const SYSCALL_SHM_CREATE: usize = 2002;
+/// Flush GPU display.
+const SYSCALL_FB_FLUSH: usize = 2003;
 
 /// Fixed virtual address for the shared memory page.
 const SHARED_MEM_VA: usize = 0x3000_0000;
@@ -310,6 +312,12 @@ extern "C" fn rust_main() -> ! {
                         }
                         SYSCALL_SHM_CREATE => {
                             let ret = handle_shm_create();
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_FB_FLUSH => {
+                            let ret = handle_fb_flush();
                             *ctx.a_mut(0) = ret;
                             unsafe { (*processor).make_current_suspend() };
                             continue;
@@ -485,12 +493,17 @@ fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> u
         }
     }
 
+    0
+}
+
+/// FB_FLUSH: flush the GPU display. Call once per frame after all fb_write calls.
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_flush() -> usize {
     let gpu = unsafe {
         let p = &raw mut GPU;
         (*p).as_mut().expect("GPU not initialized")
     };
     gpu.flush().expect("GPU flush failed");
-
     0
 }
 

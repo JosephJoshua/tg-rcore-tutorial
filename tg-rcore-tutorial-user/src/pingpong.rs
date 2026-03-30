@@ -3,7 +3,7 @@
 //! Parent process: player 1 (W/S keys), runs ball physics and rendering.
 //! Child process: player 2 (Up/Down keys), writes input to shared memory.
 
-use crate::{fb_info, fb_write, shm_create};
+use crate::{fb_flush, fb_info, fb_write, shm_create};
 
 // ─── Constants ───
 
@@ -431,6 +431,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     draw_paddle(PADDLE2_X, state.paddle2_y);
     // "PRESS SPACE TO START" = 20 chars
     draw_message(20);
+    fb_flush(); // flush once after all initial drawing
 
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
@@ -537,6 +538,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
             prev_score2 = state.score2;
         }
 
+        fb_flush(); // one flush per frame
         state.tick = state.tick.wrapping_add(1);
         crate::sched_yield();
     }

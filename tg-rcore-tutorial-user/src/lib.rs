@@ -60,6 +60,17 @@ pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
     ret
 }
 
+/// Flush the GPU display. Call once per frame after all fb_write calls.
+pub fn fb_flush() {
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2003usize,
+            lateout("a0") _,
+        );
+    }
+}
+
 /// Request a shared memory page from the kernel.
 /// Returns the virtual address of the shared page, or usize::MAX on failure.
 pub fn shm_create() -> usize {
