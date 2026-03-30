@@ -93,10 +93,10 @@ const KEY_W: u8 = 17;
 const KEY_A: u8 = 30;
 const KEY_S: u8 = 31;
 const KEY_D: u8 = 32;
-const KEY_UP: u8 = 72;
-const KEY_LEFT: u8 = 75;
-const KEY_DOWN: u8 = 80;
-const KEY_RIGHT: u8 = 77;
+const KEY_UP: u8 = 103;
+const KEY_LEFT: u8 = 105;
+const KEY_DOWN: u8 = 108;
+const KEY_RIGHT: u8 = 106;
 const KEY_SPACE: u8 = 57;
 const KEY_Q: u8 = 16;
 const KEY_ESC: u8 = 1;
@@ -125,6 +125,7 @@ const WALL_SHADOW: [u8; 4] = [0x80, 0x10, 0x10, 0xFF];
 const DOT_COLOR: [u8; 4] = [0x97, 0xB8, 0xFF, 0xFF];
 const PELLET_COLOR: [u8; 4] = [0xD0, 0xFF, 0xFF, 0xFF];
 const PAC_BODY: [u8; 4] = [0x00, 0xD7, 0xFF, 0xFF];
+const PAC_HIGHLIGHT: [u8; 4] = [0x50, 0xEE, 0xFF, 0xFF]; // brighter yellow center
 const PAC_MOUTH: [u8; 4] = [0x08, 0x08, 0x08, 0xFF]; // same as path
 const GHOST_COLORS: [[u8; 4]; 4] = [
     [0x00, 0x00, 0xFF, 0xFF], // Blinky: red
@@ -136,9 +137,13 @@ const FRIGHT_BODY: [u8; 4] = [0xB8, 0x18, 0x18, 0xFF];
 const GHOST_EYE_WHITE: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 const GHOST_EYE_PUPIL: [u8; 4] = [0x40, 0x10, 0x10, 0xFF];
 const FRIGHT_EYE: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-const TEXT_COLOR: [u8; 4] = [0xEE, 0xF0, 0xFF, 0xFF];
+const GATE_COLOR: [u8; 4] = [0xB4, 0x69, 0xFF, 0xFF]; // hot pink gate
+const TEXT_COLOR: [u8; 4] = [0xD0, 0xE8, 0xFF, 0xFF]; // warm cream for score digits
+const TEXT_GREEN: [u8; 4] = [0x60, 0xFF, 0x60, 0xFF]; // green for high score
 const TEXT_LABEL: [u8; 4] = [0x60, 0x50, 0x80, 0xFF];
 const TEXT_DIM: [u8; 4] = [0x40, 0x30, 0x50, 0xFF];
+const HUD_BG: [u8; 4] = [0x10, 0x08, 0x08, 0xFF]; // dark HUD background
+const HUD_BORDER: [u8; 4] = [0xDE, 0x21, 0x21, 0xFF]; // bright blue border (reuses WALL_FACE)
 const READY_COLOR: [u8; 4] = [0x00, 0xD7, 0xFF, 0xFF];
 const GAMEOVER_COLOR: [u8; 4] = [0x30, 0x30, 0xFF, 0xFF];
 
@@ -493,6 +498,16 @@ fn draw_pellet(gx: usize, gy: usize, visible: bool) {
     }
 }
 
+/// Draw the ghost house gate (top edge of ghost house, row 8, cols 9-11).
+fn draw_ghost_house_gate(gx: usize, gy: usize) {
+    let px = MAZE_PX_X + gx * CELL_SIZE;
+    let py = MAZE_PX_Y + gy * CELL_SIZE;
+    // Fill cell with path color
+    fill_rect(px, py, CELL_SIZE, CELL_SIZE, PATH_COLOR);
+    // Draw gate bar (hot pink) at the top of the cell, 4 pixels high
+    fill_rect(px, py, CELL_SIZE, 4, GATE_COLOR);
+}
+
 fn draw_maze(maze: &[u8]) {
     for gy in 0..MAZE_H {
         for gx in 0..MAZE_W {
@@ -509,8 +524,12 @@ fn draw_maze(maze: &[u8]) {
                     draw_path_cell(px, py);
                     draw_pellet(gx, gy, true);
                 }
+                4 if gy == 8 && gx >= 9 && gx <= 11 => {
+                    // Ghost house top gate
+                    draw_ghost_house_gate(gx, gy);
+                }
                 _ => {
-                    // EMPTY, GHOST, TUNNEL
+                    // EMPTY, GHOST interior, TUNNEL
                     draw_path_cell(px, py);
                 }
             }
@@ -535,7 +554,8 @@ fn erase_cell(gx: u8, gy: u8) {
     fill_rect(px, py, CELL_SIZE, CELL_SIZE, PATH_COLOR);
 }
 
-/// Draw Pac-Man as a filled circle with a mouth wedge.
+/// Draw Pac-Man as a filled circle with rounded corners, a directional mouth,
+/// and a brighter highlight in the center.
 fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
     let (px, py) = cell_px(gx, gy);
     let cs = CHAR_SIZE;
@@ -557,14 +577,25 @@ fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
         for col in 0..cs {
             let dy = row as i32 - r;
             let dx = col as i32 - r;
+
+            // Rounded corner check: skip 2x2 blocks at the four corners
+            let in_corner = (row < 2 && col < 2)
+                || (row < 2 && col >= cs - 2)
+                || (row >= cs - 2 && col < 2)
+                || (row >= cs - 2 && col >= cs - 2);
+
+            if in_corner {
+                continue; // leave as PATH_COLOR
+            }
+
             if dx * dx + dy * dy <= r2 {
-                // Check if in mouth wedge
+                // Check if in mouth wedge (4 pixels deep)
                 let in_mouth = if mouth_open {
                     match dir {
-                        DIR_RIGHT => dx > 0 && dy.unsigned_abs() as i32 * 3 < dx * 2,
-                        DIR_LEFT => dx < 0 && dy.unsigned_abs() as i32 * 3 < (-dx) * 2,
-                        DIR_UP => dy < 0 && dx.unsigned_abs() as i32 * 3 < (-dy) * 2,
-                        DIR_DOWN => dy > 0 && dx.unsigned_abs() as i32 * 3 < dy * 2,
+                        DIR_RIGHT => dx > 0 && dx <= 4 + r && dy.unsigned_abs() as i32 * 3 < dx * 2,
+                        DIR_LEFT => dx < 0 && (-dx) <= 4 + r && dy.unsigned_abs() as i32 * 3 < (-dx) * 2,
+                        DIR_UP => dy < 0 && (-dy) <= 4 + r && dx.unsigned_abs() as i32 * 3 < (-dy) * 2,
+                        DIR_DOWN => dy > 0 && dy <= 4 + r && dx.unsigned_abs() as i32 * 3 < dy * 2,
                         _ => false,
                     }
                 } else {
@@ -577,10 +608,17 @@ fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
                     buf[idx + 2] = PAC_MOUTH[2];
                     buf[idx + 3] = PAC_MOUTH[3];
                 } else {
-                    buf[idx] = PAC_BODY[0];
-                    buf[idx + 1] = PAC_BODY[1];
-                    buf[idx + 2] = PAC_BODY[2];
-                    buf[idx + 3] = PAC_BODY[3];
+                    // Highlight center 10x10 area
+                    let in_highlight = dx.unsigned_abs() <= 5 && dy.unsigned_abs() <= 5;
+                    let color = if in_highlight {
+                        PAC_HIGHLIGHT
+                    } else {
+                        PAC_BODY
+                    };
+                    buf[idx] = color[0];
+                    buf[idx + 1] = color[1];
+                    buf[idx + 2] = color[2];
+                    buf[idx + 3] = color[3];
                 }
             }
         }
@@ -589,15 +627,31 @@ fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
     fb_write(px as u32, py as u32, cs as u32, cs as u32, buf.as_ptr());
 }
 
-/// Draw a ghost sprite (body + eyes + wavy skirt).
+/// Blend a highlight into a base color (simple additive lightening).
+fn lighten_color(base: [u8; 4], amount: u8) -> [u8; 4] {
+    let r = (base[0] as u16 + amount as u16).min(255) as u8;
+    let g = (base[1] as u16 + amount as u16).min(255) as u8;
+    let b = (base[2] as u16 + amount as u16).min(255) as u8;
+    [r, g, b, base[3]]
+}
+
+/// Darken a color by a fixed amount.
+fn darken_color(base: [u8; 4], amount: u8) -> [u8; 4] {
+    let r = (base[0] as i16 - amount as i16).max(0) as u8;
+    let g = (base[1] as i16 - amount as i16).max(0) as u8;
+    let b = (base[2] as i16 - amount as i16).max(0) as u8;
+    [r, g, b, base[3]]
+}
+
+/// Draw a ghost sprite with dome top, directional eyes, wavy skirt,
+/// and special rendering for frightened/eaten states.
 fn draw_ghost(gx: u8, gy: u8, ghost_idx: usize, dir: u8, frightened: bool, eaten: bool) {
-    let (_px, _py) = cell_px(gx, gy);
     let cs = CHAR_SIZE;
     let half = cs / 2;
 
     // 20x20 pixel buffer = 1600 bytes
     let mut buf = [0u8; 20 * 20 * 4];
-    // Fill with path color
+    // Fill with path color (background)
     for i in 0..(cs * cs) {
         buf[i * 4] = PATH_COLOR[0];
         buf[i * 4 + 1] = PATH_COLOR[1];
@@ -611,73 +665,122 @@ fn draw_ghost(gx: u8, gy: u8, ghost_idx: usize, dir: u8, frightened: bool, eaten
         } else {
             GHOST_COLORS[ghost_idx]
         };
+        let highlight_color = lighten_color(body_color, 40);
+        let dark_color = darken_color(body_color, 50);
 
-        // Draw rounded-top body shape
+        // Draw dome-topped body with wavy skirt bottom
         for row in 0..cs {
             for col in 0..cs {
                 let draw = if row < half {
-                    // Top half: circular dome
+                    // Top half: circular dome with rounded corners
                     let dy = row as i32 - half as i32;
                     let dx = col as i32 - half as i32;
                     let r = half as i32;
                     dx * dx + dy * dy <= r * r
                 } else if row >= cs - 3 {
-                    // Bottom: wavy skirt
-                    let wave = ((col / 4) + 1) % 2 == 0;
+                    // Bottom 3 rows: wavy skirt with 5 bumps
+                    // Each bump is ~4 pixels wide across 20 pixels
+                    let bump_idx = col / 4; // 0..4 (5 bumps)
+                    let in_bump = bump_idx % 2 == 0;
                     if row == cs - 1 {
-                        wave
+                        // Bottom row: only the bump peaks
+                        in_bump && col >= 1 && col < cs - 1
                     } else if row == cs - 2 {
-                        true
+                        // Second-to-last: slightly wider
+                        col >= 1 && col < cs - 1
                     } else {
-                        true
+                        // Third-to-last: full width
+                        col >= 1 && col < cs - 1
                     }
                 } else {
-                    // Middle: full width rectangular body
+                    // Middle: full-width rectangular body
                     col >= 1 && col < cs - 1
                 };
 
                 if draw {
                     let idx = (row * cs + col) * 4;
-                    buf[idx] = body_color[0];
-                    buf[idx + 1] = body_color[1];
-                    buf[idx + 2] = body_color[2];
-                    buf[idx + 3] = body_color[3];
+                    // Lighter highlight on top third of body
+                    let color = if row < half / 2 {
+                        highlight_color
+                    } else if row >= cs - 3 && (col / 4) % 2 != 0 && row >= cs - 2 {
+                        dark_color // dark alternating bumps in skirt
+                    } else {
+                        body_color
+                    };
+                    buf[idx] = color[0];
+                    buf[idx + 1] = color[1];
+                    buf[idx + 2] = color[2];
+                    buf[idx + 3] = color[3];
                 }
             }
         }
     }
 
-    // Draw eyes (always visible, even when eaten -- eyes-only for eaten ghosts)
+    // Eyes: 6x4 whites with 3x2 directional pupils
     let eye_y = 6usize;
-    let eye_left_x = 4usize;
-    let eye_right_x = 12usize;
-    let eye_w = 5usize;
-    let eye_h = 5usize;
+    let eye_left_x = 3usize;
+    let eye_right_x = 11usize;
+    let eye_w = 6usize;
+    let eye_h = 4usize;
 
-    let eye_color = if frightened && !eaten {
-        FRIGHT_EYE
-    } else {
-        GHOST_EYE_WHITE
-    };
-
-    // Draw eye whites
-    for ey in 0..eye_h {
-        for ex in 0..eye_w {
-            let li = ((eye_y + ey) * cs + eye_left_x + ex) * 4;
-            let ri = ((eye_y + ey) * cs + eye_right_x + ex) * 4;
-            buf[li] = eye_color[0];
-            buf[li + 1] = eye_color[1];
-            buf[li + 2] = eye_color[2];
-            buf[li + 3] = eye_color[3];
-            buf[ri] = eye_color[0];
-            buf[ri + 1] = eye_color[1];
-            buf[ri + 2] = eye_color[2];
-            buf[ri + 3] = eye_color[3];
+    if frightened && !eaten {
+        // Frightened ghost: small white dot eyes
+        let dot_positions: [(usize, usize); 4] = [
+            (eye_y + 1, eye_left_x + 2),
+            (eye_y + 1, eye_left_x + 3),
+            (eye_y + 1, eye_right_x + 2),
+            (eye_y + 1, eye_right_x + 3),
+        ];
+        for (dy, dx) in dot_positions {
+            let idx = (dy * cs + dx) * 4;
+            if idx + 3 < buf.len() {
+                buf[idx] = FRIGHT_EYE[0];
+                buf[idx + 1] = FRIGHT_EYE[1];
+                buf[idx + 2] = FRIGHT_EYE[2];
+                buf[idx + 3] = FRIGHT_EYE[3];
+            }
         }
-    }
 
-    // Draw pupils (directional) -- not drawn if frightened (unless eaten)
-    if !frightened || eaten {
+        // Frightened mouth: white zigzag dots
+        let mouth_y = 14usize;
+        for mx in 3..17 {
+            let my_off: usize = match mx % 4 {
+                0 => 0,
+                1 => 1,
+                2 => 0,
+                _ => 1,
+            };
+            let idx = ((mouth_y + my_off) * cs + mx) * 4;
+            if idx + 3 < buf.len() {
+                buf[idx] = FRIGHT_EYE[0];
+                buf[idx + 1] = FRIGHT_EYE[1];
+                buf[idx + 2] = FRIGHT_EYE[2];
+                buf[idx + 3] = FRIGHT_EYE[3];
+            }
+        }
+    } else {
+        // Normal or eaten: draw proper eye whites and directional pupils
+        // Draw eye whites (6x4)
+        for ey in 0..eye_h {
+            for ex in 0..eye_w {
+                let li = ((eye_y + ey) * cs + eye_left_x + ex) * 4;
+                let ri = ((eye_y + ey) * cs + eye_right_x + ex) * 4;
+                if li + 3 < buf.len() {
+                    buf[li] = GHOST_EYE_WHITE[0];
+                    buf[li + 1] = GHOST_EYE_WHITE[1];
+                    buf[li + 2] = GHOST_EYE_WHITE[2];
+                    buf[li + 3] = GHOST_EYE_WHITE[3];
+                }
+                if ri + 3 < buf.len() {
+                    buf[ri] = GHOST_EYE_WHITE[0];
+                    buf[ri + 1] = GHOST_EYE_WHITE[1];
+                    buf[ri + 2] = GHOST_EYE_WHITE[2];
+                    buf[ri + 3] = GHOST_EYE_WHITE[3];
+                }
+            }
+        }
+
+        // Draw pupils (3x2) offset by direction
         let (pdx, pdy): (i32, i32) = match dir {
             DIR_UP => (0, -1),
             DIR_DOWN => (0, 1),
@@ -685,38 +788,30 @@ fn draw_ghost(gx: u8, gy: u8, ghost_idx: usize, dir: u8, frightened: bool, eaten
             DIR_RIGHT => (1, 0),
             _ => (0, 0),
         };
-        let pupil_cx = 2i32 + pdx;
-        let pupil_cy = 2i32 + pdy;
-        for py2 in 0..3i32 {
+        // Pupil center within eye white area
+        let pupil_cx = 3i32 + pdx;
+        let pupil_cy = 1i32 + pdy;
+        for py2 in 0..2i32 {
             for px2 in 0..3i32 {
-                let ry = pupil_cy - 1 + py2;
+                let ry = pupil_cy + py2;
                 let rx = pupil_cx - 1 + px2;
                 if ry >= 0 && ry < eye_h as i32 && rx >= 0 && rx < eye_w as i32 {
                     let li = ((eye_y + ry as usize) * cs + eye_left_x + rx as usize) * 4;
                     let ri = ((eye_y + ry as usize) * cs + eye_right_x + rx as usize) * 4;
-                    buf[li] = GHOST_EYE_PUPIL[0];
-                    buf[li + 1] = GHOST_EYE_PUPIL[1];
-                    buf[li + 2] = GHOST_EYE_PUPIL[2];
-                    buf[li + 3] = GHOST_EYE_PUPIL[3];
-                    buf[ri] = GHOST_EYE_PUPIL[0];
-                    buf[ri + 1] = GHOST_EYE_PUPIL[1];
-                    buf[ri + 2] = GHOST_EYE_PUPIL[2];
-                    buf[ri + 3] = GHOST_EYE_PUPIL[3];
+                    if li + 3 < buf.len() {
+                        buf[li] = GHOST_EYE_PUPIL[0];
+                        buf[li + 1] = GHOST_EYE_PUPIL[1];
+                        buf[li + 2] = GHOST_EYE_PUPIL[2];
+                        buf[li + 3] = GHOST_EYE_PUPIL[3];
+                    }
+                    if ri + 3 < buf.len() {
+                        buf[ri] = GHOST_EYE_PUPIL[0];
+                        buf[ri + 1] = GHOST_EYE_PUPIL[1];
+                        buf[ri + 2] = GHOST_EYE_PUPIL[2];
+                        buf[ri + 3] = GHOST_EYE_PUPIL[3];
+                    }
                 }
             }
-        }
-    }
-
-    // Frightened mouth (wavy white line)
-    if frightened && !eaten {
-        let mouth_y = 14usize;
-        for mx in 2..18 {
-            let my_off: usize = if (mx / 2) % 2 == 0 { 0 } else { 1 };
-            let idx = ((mouth_y + my_off) * cs + mx) * 4;
-            buf[idx] = FRIGHT_EYE[0];
-            buf[idx + 1] = FRIGHT_EYE[1];
-            buf[idx + 2] = FRIGHT_EYE[2];
-            buf[idx + 3] = FRIGHT_EYE[3];
         }
     }
 
@@ -729,33 +824,95 @@ fn draw_ghost(gx: u8, gy: u8, ghost_idx: usize, dir: u8, frightened: bool, eaten
 // HUD rendering
 // ============================================================
 
+/// HUD panel width
+const HUD_PANEL_W: usize = 200;
+/// HUD panel height (matches maze height)
+const HUD_PANEL_H: usize = MAZE_H * CELL_SIZE;
+
+fn draw_hud_panel() {
+    // Dark background panel
+    fill_rect(HUD_X - 4, HUD_Y, HUD_PANEL_W, HUD_PANEL_H, HUD_BG);
+    // 2px bright blue border on the left edge
+    fill_rect(HUD_X - 4, HUD_Y, 2, HUD_PANEL_H, HUD_BORDER);
+}
+
 fn draw_hud_static() {
-    // Labels
-    draw_string(HUD_X, HUD_Y, b"SCORE", TEXT_LABEL);
-    draw_string(HUD_X, HUD_Y + 60, b"HIGH", TEXT_LABEL);
-    draw_string(HUD_X, HUD_Y + 120, b"LIVES", TEXT_LABEL);
-    draw_string(HUD_X, HUD_Y + 180, b"LEVEL", TEXT_LABEL);
+    // Draw the HUD panel background and border
+    draw_hud_panel();
+
+    // "1UP" label
+    draw_string(HUD_X + 8, HUD_Y + 10, b"1UP", TEXT_LABEL);
+    // "HIGH SCORE" label
+    draw_string(HUD_X + 8, HUD_Y + 70, b"HIGH SCORE", TEXT_LABEL);
+    // "LEVEL" label
+    draw_string(HUD_X + 8, HUD_Y + 130, b"LEVEL", TEXT_LABEL);
+    // "LIVES" label
+    draw_string(HUD_X + 8, HUD_Y + 190, b"LIVES", TEXT_LABEL);
 
     // Controls
-    let cy = HUD_Y + 260;
-    draw_string(HUD_X, cy, b"CONTROLS", TEXT_DIM);
+    let cy = HUD_Y + 300;
+    draw_string(HUD_X + 8, cy, b"CONTROLS", TEXT_DIM);
     let dy: usize = 22;
-    draw_string(HUD_X, cy + dy, b"WASD  MOVE", TEXT_DIM);
-    draw_string(HUD_X, cy + dy * 2, b"SPC   PAUSE", TEXT_DIM);
-    draw_string(HUD_X, cy + dy * 3, b"Q     QUIT", TEXT_DIM);
+    draw_string(HUD_X + 8, cy + dy, b"WASD  MOVE", TEXT_DIM);
+    draw_string(HUD_X + 8, cy + dy * 2, b"SPC   PAUSE", TEXT_DIM);
+    draw_string(HUD_X + 8, cy + dy * 3, b"Q     QUIT", TEXT_DIM);
+}
+
+/// Draw a small 8x8 Pac-Man icon for life display at given position.
+fn draw_life_icon(x: usize, y: usize) {
+    let sz: usize = 8;
+    let half = sz / 2;
+    let r = half as i32;
+    let r2 = r * r;
+    let mut buf = [0u8; 8 * 8 * 4];
+    for i in 0..(sz * sz) {
+        buf[i * 4] = HUD_BG[0];
+        buf[i * 4 + 1] = HUD_BG[1];
+        buf[i * 4 + 2] = HUD_BG[2];
+        buf[i * 4 + 3] = HUD_BG[3];
+    }
+    for row in 0..sz {
+        for col in 0..sz {
+            let dy = row as i32 - r;
+            let dx = col as i32 - r;
+            if dx * dx + dy * dy <= r2 {
+                // Small mouth facing right
+                let in_mouth = dx > 0 && dy.unsigned_abs() as i32 * 2 < dx;
+                if !in_mouth {
+                    let idx = (row * sz + col) * 4;
+                    buf[idx] = PAC_BODY[0];
+                    buf[idx + 1] = PAC_BODY[1];
+                    buf[idx + 2] = PAC_BODY[2];
+                    buf[idx + 3] = PAC_BODY[3];
+                }
+            }
+        }
+    }
+    fb_write(x as u32, y as u32, sz as u32, sz as u32, buf.as_ptr());
 }
 
 fn draw_hud_values(score: u32, high_score: u32, lives: u32, level: u32) {
-    // Clear value areas
-    fill_rect(HUD_X, HUD_Y + 25, 120, 18, BG_VOID);
-    fill_rect(HUD_X, HUD_Y + 85, 120, 18, BG_VOID);
-    fill_rect(HUD_X, HUD_Y + 145, 120, 18, BG_VOID);
-    fill_rect(HUD_X, HUD_Y + 205, 120, 18, BG_VOID);
+    // Clear value areas (on HUD_BG background)
+    fill_rect(HUD_X + 8, HUD_Y + 35, 140, 18, HUD_BG);
+    fill_rect(HUD_X + 8, HUD_Y + 95, 140, 18, HUD_BG);
+    fill_rect(HUD_X + 8, HUD_Y + 155, 140, 18, HUD_BG);
+    fill_rect(HUD_X + 8, HUD_Y + 215, 140, 18, HUD_BG);
 
-    draw_number(HUD_X, HUD_Y + 25, score, TEXT_COLOR);
-    draw_number(HUD_X, HUD_Y + 85, high_score, TEXT_COLOR);
-    draw_number(HUD_X, HUD_Y + 145, lives, TEXT_COLOR);
-    draw_number(HUD_X, HUD_Y + 205, level, TEXT_COLOR);
+    // Score in warm cream
+    draw_number(HUD_X + 8, HUD_Y + 35, score, TEXT_COLOR);
+    // High score in green
+    draw_number(HUD_X + 8, HUD_Y + 95, high_score, TEXT_GREEN);
+    // Level
+    draw_number(HUD_X + 8, HUD_Y + 155, level, TEXT_COLOR);
+
+    // Lives: draw as small Pac-Man icons
+    let lives_y = HUD_Y + 215;
+    let mut lx = HUD_X + 8;
+    let max_lives = if lives > 10 { 10 } else { lives };
+    for _ in 0..max_lives {
+        draw_life_icon(lx, lives_y);
+        lx += 14;
+    }
 }
 
 // ============================================================
@@ -1582,9 +1739,9 @@ pub fn run_game() {
                     game.mouth_timer = 0;
                 }
 
-                // Pellet blink
+                // Pellet blink (pulse every 4 ticks)
                 game.pellet_blink_timer += 1;
-                if game.pellet_blink_timer >= 3 {
+                if game.pellet_blink_timer >= 4 {
                     game.pellet_blink = !game.pellet_blink;
                     game.pellet_blink_timer = 0;
                 }
