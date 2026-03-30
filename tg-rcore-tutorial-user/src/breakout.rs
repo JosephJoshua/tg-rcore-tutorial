@@ -28,25 +28,30 @@ const INIT_BALL_SPEED: i32 = 3 * FP;
 
 // ========== Colors (BGRA) ==========
 
-const BG: [u8; 4] = [0x1E, 0x0A, 0x0A, 0xFF];
-const PLAY_BG: [u8; 4] = [0x22, 0x11, 0x11, 0xFF];
-const PADDLE_COLOR: [u8; 4] = [0xFF, 0xEE, 0xDD, 0xFF];
+const BG: [u8; 4] = [0x12, 0x06, 0x08, 0xFF];       // deep void
+const PLAY_BG: [u8; 4] = [0x18, 0x0A, 0x0C, 0xFF];   // slightly lighter void
+const PADDLE_COLOR: [u8; 4] = [0xFF, 0xCC, 0x40, 0xFF]; // electric amber
 const BALL_COLOR: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-const TEXT_VALUE: [u8; 4] = [0xFF, 0xEE, 0xDD, 0xFF];
-const TEXT_LABEL: [u8; 4] = [0x80, 0x60, 0x50, 0xFF];
-const TEXT_TITLE: [u8; 4] = [0x40, 0xE0, 0xFF, 0xFF];
-const TEXT_KEY: [u8; 4] = [0x30, 0xE0, 0x30, 0xFF];
-const TEXT_DIM: [u8; 4] = [0x55, 0x44, 0x40, 0xFF];
-const GAMEOVER_BG: [u8; 4] = [0x10, 0x05, 0x05, 0xE0];
-const GAMEOVER_TEXT: [u8; 4] = [0x20, 0x30, 0xFF, 0xFF];
+const BALL_GLOW: [u8; 4] = [0x80, 0xD0, 0xFF, 0x60];   // soft cyan halo
+const TEXT_VALUE: [u8; 4] = [0xEE, 0xF0, 0xFF, 0xFF];   // cool white
+const TEXT_LABEL: [u8; 4] = [0x60, 0x50, 0x80, 0xFF];   // muted lavender
+const TEXT_TITLE: [u8; 4] = [0xFF, 0x80, 0x20, 0xFF];   // hot orange (BGRA)
+const TEXT_TITLE_GLOW: [u8; 4] = [0x40, 0x20, 0x08, 0xFF]; // dim orange shadow
+const TEXT_KEY: [u8; 4] = [0x40, 0xF0, 0xFF, 0xFF];     // neon cyan
+const TEXT_DIM: [u8; 4] = [0x40, 0x30, 0x50, 0xFF];     // dusty purple
+const GAMEOVER_BG: [u8; 4] = [0x08, 0x02, 0x02, 0xE8];
+const GAMEOVER_TEXT: [u8; 4] = [0x30, 0x30, 0xFF, 0xFF]; // neon red
+const GLOW_OUTER: [u8; 4] = [0x40, 0x10, 0x08, 0xFF];   // dim orange glow
+const GLOW_MID: [u8; 4] = [0x60, 0x20, 0x10, 0xFF];     // mid orange glow
+const GLOW_INNER: [u8; 4] = [0xA0, 0x40, 0x18, 0xFF];   // hot orange glow
 
-// Row colors for bricks (top to bottom): red, orange, yellow, green, cyan
+// Row colors for bricks (top to bottom) — vivid neon BGRA
 const BRICK_COLORS: [[u8; 4]; 5] = [
-    [0x30, 0x30, 0xF0, 0xFF], // Row 0: red (BGRA)
-    [0x20, 0x90, 0xF0, 0xFF], // Row 1: orange
-    [0x00, 0xE8, 0xF0, 0xFF], // Row 2: yellow
-    [0x20, 0xF0, 0x40, 0xFF], // Row 3: green
-    [0xFF, 0xE0, 0x20, 0xFF], // Row 4: cyan
+    [0x20, 0x20, 0xF8, 0xFF], // Row 0: hot red
+    [0x10, 0x60, 0xF8, 0xFF], // Row 1: deep orange
+    [0x00, 0xD0, 0xF0, 0xFF], // Row 2: golden yellow
+    [0x20, 0xE8, 0x30, 0xFF], // Row 3: neon green
+    [0xF0, 0xC0, 0x10, 0xFF], // Row 4: electric cyan
 ];
 
 // Points per row (top = most valuable)
@@ -316,12 +321,37 @@ fn draw_number(x: usize, y: usize, mut n: u32, color: [u8; 4]) {
     draw_string(x, y, &d[..len], color);
 }
 
+// ========== Visual helpers ==========
+
+fn highlight(c: [u8; 4]) -> [u8; 4] {
+    [c[0].saturating_add(50), c[1].saturating_add(50), c[2].saturating_add(50), c[3]]
+}
+
+fn shadow(c: [u8; 4]) -> [u8; 4] {
+    [(c[0] as u16 * 40 / 100) as u8, (c[1] as u16 * 40 / 100) as u8,
+     (c[2] as u16 * 40 / 100) as u8, c[3]]
+}
+
 // ========== Game-specific rendering ==========
 
 fn draw_brick(col: usize, row: usize) {
     let bx = BRICK_OFFSET_X + col * (BRICK_W + BRICK_GAP);
     let by = BRICK_OFFSET_Y + row * (BRICK_H + BRICK_GAP);
-    draw_rect(bx, by, BRICK_W, BRICK_H, BRICK_COLORS[row]);
+    let base = BRICK_COLORS[row];
+    let hi = highlight(base);
+    let sh = shadow(base);
+    // 3D beveled brick: bright top-left edge, dark bottom-right edge
+    let bevel: usize = 2;
+    // Top highlight strip
+    draw_rect(bx, by, BRICK_W, bevel, hi);
+    // Bottom shadow strip
+    draw_rect(bx, by + BRICK_H - bevel, BRICK_W, bevel, sh);
+    // Left highlight strip
+    draw_rect(bx, by + bevel, bevel, BRICK_H - bevel * 2, hi);
+    // Right shadow strip
+    draw_rect(bx + BRICK_W - bevel, by + bevel, bevel, BRICK_H - bevel * 2, sh);
+    // Inner face
+    draw_rect(bx + bevel, by + bevel, BRICK_W - bevel * 2, BRICK_H - bevel * 2, base);
 }
 
 fn erase_brick(col: usize, row: usize) {
@@ -331,45 +361,44 @@ fn erase_brick(col: usize, row: usize) {
 }
 
 fn draw_paddle(game: &Game) {
-    draw_rect(
-        game.paddle_x as usize,
-        PADDLE_Y,
-        PADDLE_W,
-        PADDLE_H,
-        PADDLE_COLOR,
-    );
+    let px = game.paddle_x as usize;
+    let hi = highlight(PADDLE_COLOR);
+    let sh = shadow(PADDLE_COLOR);
+    // Beveled paddle: bright top, body, dark bottom
+    draw_rect(px, PADDLE_Y, PADDLE_W, 2, hi);
+    draw_rect(px, PADDLE_Y + 2, PADDLE_W, PADDLE_H - 4, PADDLE_COLOR);
+    draw_rect(px, PADDLE_Y + PADDLE_H - 2, PADDLE_W, 2, sh);
 }
 
 fn erase_paddle(game: &Game) {
     draw_rect(game.paddle_x as usize, PADDLE_Y, PADDLE_W, PADDLE_H, PLAY_BG);
 }
 
+const GLOW_PAD: usize = 4; // glow extends this many pixels around ball
+
+fn ball_pos(game: &Game) -> (i32, i32) {
+    if game.ball_attached {
+        (game.attached_ball_x() / FP, game.attached_ball_y() / FP)
+    } else {
+        (game.ball_px_x(), game.ball_px_y())
+    }
+}
+
 fn draw_ball(game: &Game) {
-    let bx = if game.ball_attached {
-        game.attached_ball_x() / FP
-    } else {
-        game.ball_px_x()
-    };
-    let by = if game.ball_attached {
-        game.attached_ball_y() / FP
-    } else {
-        game.ball_px_y()
-    };
+    let (bx, by) = ball_pos(game);
+    // Glow halo behind ball
+    let gx = (bx as usize).saturating_sub(GLOW_PAD);
+    let gy = (by as usize).saturating_sub(GLOW_PAD);
+    draw_rect(gx, gy, BALL_SIZE + GLOW_PAD * 2, BALL_SIZE + GLOW_PAD * 2, BALL_GLOW);
+    // Bright core
     draw_rect(bx as usize, by as usize, BALL_SIZE, BALL_SIZE, BALL_COLOR);
 }
 
 fn erase_ball(game: &Game) {
-    let bx = if game.ball_attached {
-        game.attached_ball_x() / FP
-    } else {
-        game.ball_px_x()
-    };
-    let by = if game.ball_attached {
-        game.attached_ball_y() / FP
-    } else {
-        game.ball_px_y()
-    };
-    draw_rect(bx as usize, by as usize, BALL_SIZE, BALL_SIZE, PLAY_BG);
+    let (bx, by) = ball_pos(game);
+    let gx = (bx as usize).saturating_sub(GLOW_PAD);
+    let gy = (by as usize).saturating_sub(GLOW_PAD);
+    draw_rect(gx, gy, BALL_SIZE + GLOW_PAD * 2, BALL_SIZE + GLOW_PAD * 2, PLAY_BG);
 }
 
 fn draw_all_bricks(game: &Game) {
@@ -431,13 +460,16 @@ fn draw_hud(game: &mut Game) {
     draw_string(hx, cy + dy * 4, b"F9", TEXT_KEY);
 }
 
-const FLASH_COLOR: [u8; 4] = [0x30, 0xE0, 0x30, 0xFF]; // bright green
+const FLASH_COLOR: [u8; 4] = [0x40, 0xF0, 0xFF, 0xFF]; // neon cyan
+const FLASH_GLOW: [u8; 4] = [0x10, 0x40, 0x50, 0xFF];  // dim cyan shadow
 
 fn draw_flash_msg(game: &Game) {
     let msg: &[u8] = if game.flash_msg == 1 { b"SAVED" } else { b"LOADED" };
     let tw = msg.len() * CHAR_PX_W;
     let fx = PLAY_X + (PLAY_W - tw) / 2;
     let fy = PLAY_Y + PLAY_H / 2 - 10;
+    // Glow shadow then bright text
+    draw_string(fx + 2, fy + 2, msg, FLASH_GLOW);
     draw_string(fx, fy, msg, FLASH_COLOR);
 }
 
@@ -446,22 +478,35 @@ fn erase_flash_msg(game: &Game) {
     let tw = msg.len() * CHAR_PX_W;
     let fx = PLAY_X + (PLAY_W - tw) / 2;
     let fy = PLAY_Y + PLAY_H / 2 - 10;
-    draw_rect(fx, fy, tw, GLYPH_H * FONT_SCALE, PLAY_BG);
+    // Erase both text and shadow
+    draw_rect(fx, fy, tw + 2, GLYPH_H * FONT_SCALE + 2, PLAY_BG);
+}
+
+fn draw_glow_border() {
+    let bx = PLAY_X;
+    let by = PLAY_Y;
+    let bw = PLAY_W;
+    let bh = PLAY_H;
+    // 3-layer neon glow around play area
+    draw_rect(bx - 6, by - 6, bw + 12, bh + 12, GLOW_OUTER);
+    draw_rect(bx - 4, by - 4, bw + 8, bh + 8, GLOW_MID);
+    draw_rect(bx - 2, by - 2, bw + 4, bh + 4, GLOW_INNER);
 }
 
 fn draw_initial_screen(game: &mut Game) {
     // Clear entire screen
     draw_rect(0, 0, 1280, 800, BG);
 
-    // Title centered above play area
+    // Title with glow: draw dim shadow offset, then bright on top
     let title = b"BREAKOUT";
     let tw = title.len() * CHAR_PX_W;
-    draw_string(
-        PLAY_X + (PLAY_W - tw) / 2,
-        PLAY_Y - 40,
-        title,
-        TEXT_TITLE,
-    );
+    let tx = PLAY_X + (PLAY_W - tw) / 2;
+    let ty = PLAY_Y - 45;
+    draw_string(tx + 2, ty + 2, title, TEXT_TITLE_GLOW);
+    draw_string(tx, ty, title, TEXT_TITLE);
+
+    // Neon glow border
+    draw_glow_border();
 
     // Play area background
     draw_rect(PLAY_X, PLAY_Y, PLAY_W, PLAY_H, PLAY_BG);
@@ -481,18 +526,32 @@ fn draw_initial_screen(game: &mut Game) {
 }
 
 fn draw_game_over(game: &Game) {
-    let ow = PLAY_W - 100;
-    let oh = 120;
-    let ox = PLAY_X + 50;
+    let ow = PLAY_W - 60;
+    let oh = 160;
+    let ox = PLAY_X + 30;
     let oy = PLAY_Y + (PLAY_H - oh) / 2;
+    // Dark overlay with glowing border
+    draw_rect(ox - 4, oy - 4, ow + 8, oh + 8, GLOW_OUTER);
+    draw_rect(ox - 2, oy - 2, ow + 4, oh + 4, GLOW_MID);
     draw_rect(ox, oy, ow, oh, GAMEOVER_BG);
 
-    draw_string(ox + 40, oy + 15, b"GAME OVER", GAMEOVER_TEXT);
+    // Centered "GAME OVER" title
+    let go_text = b"GAME OVER";
+    let go_w = go_text.len() * CHAR_PX_W;
+    let go_x = ox + (ow - go_w) / 2;
+    draw_string(go_x + 2, oy + 22, go_text, [0x10, 0x10, 0x80, 0xFF]);
+    draw_string(go_x, oy + 20, go_text, GAMEOVER_TEXT);
 
-    draw_string(ox + 40, oy + 50, b"SCORE", TEXT_LABEL);
-    draw_number(ox + 40 + 6 * CHAR_PX_W, oy + 50, game.score, TEXT_VALUE);
+    // Score display centered
+    let score_label = b"SCORE";
+    let sl_w = score_label.len() * CHAR_PX_W;
+    draw_string(ox + (ow - sl_w) / 2 - 40, oy + 70, score_label, TEXT_LABEL);
+    draw_number(ox + (ow - sl_w) / 2 + sl_w - 20, oy + 70, game.score, TEXT_VALUE);
 
-    draw_string(ox + 40, oy + 80, b"PRESS ENTER", TEXT_DIM);
+    // Prompt
+    let prompt = b"PRESS ENTER";
+    let pw = prompt.len() * CHAR_PX_W;
+    draw_string(ox + (ow - pw) / 2, oy + 115, prompt, TEXT_KEY);
 }
 
 // ========== Physics ==========
