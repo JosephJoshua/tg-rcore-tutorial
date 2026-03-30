@@ -743,10 +743,17 @@ mod impls {
                             if let Some(kbd) = keyboard {
                                 // Drain non-keypress events (syncs, releases) until we
                                 // find an actual key-down or exhaust the queue.
-                                // VNC keyboards generate ~4 events per keypress.
                                 loop {
                                     match kbd.pop_pending_event() {
                                         Some(event) => {
+                                            // Debug: print first few keyboard events to serial
+                                            static mut KBD_DBG_COUNT: u32 = 0;
+                                            unsafe {
+                                                if KBD_DBG_COUNT < 10 {
+                                                    KBD_DBG_COUNT += 1;
+                                                    log::info!("kbd event: type={} code={} value={}", event.event_type, event.code, event.value);
+                                                }
+                                            }
                                             if event.event_type == 1 && event.value == 1 && event.code < 256 {
                                                 unsafe { *ptr.as_mut() = event.code as u8 };
                                                 return 1;
