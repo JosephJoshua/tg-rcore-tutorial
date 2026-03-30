@@ -437,9 +437,22 @@ pub fn run() {
 
 fn child_loop(state: &mut SharedState) -> ! {
     crate::println!("[pingpong] child PID={} (player 2)", crate::getpid());
-    // Child just stays alive — parent handles all input via shared keyboard.
-    // Shared memory is still used: parent writes paddle2_y, child observes game_state.
+    // Child owns paddle 2 movement. Parent writes p2_up/p2_down flags
+    // to shared memory; child reads them, moves paddle2_y, clears flags.
     loop {
+        if state.p2_up != 0 {
+            state.paddle2_y -= PADDLE_SPEED;
+            state.p2_up = 0;
+        }
+        if state.p2_down != 0 {
+            state.paddle2_y += PADDLE_SPEED;
+            state.p2_down = 0;
+        }
+        state.paddle2_y = clamp(
+            state.paddle2_y,
+            PLAY_TOP + 4,
+            PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
+        );
         if state.game_state == STATE_GAME_OVER && state.tick == u32::MAX {
             crate::exit(0);
             unreachable!();
@@ -475,7 +488,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 }
             }
             STATE_PLAYING => {
-                // Move paddles based on held keys — every frame, not just on events
+                // Parent moves paddle 1 directly
                 if keys.w {
                     state.paddle1_y -= PADDLE_SPEED;
                 }
@@ -488,17 +501,10 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                     PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
                 );
 
-                if keys.up {
-                    state.paddle2_y -= PADDLE_SPEED;
-                }
-                if keys.down {
-                    state.paddle2_y += PADDLE_SPEED;
-                }
-                state.paddle2_y = clamp(
-                    state.paddle2_y,
-                    PLAY_TOP + 4,
-                    PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
-                );
+                // Parent writes P2 held-state to shared memory;
+                // child process reads it and moves paddle2_y
+                state.p2_up = keys.up as u8;
+                state.p2_down = keys.down as u8;
 
                 update_physics(state, rng);
             }
