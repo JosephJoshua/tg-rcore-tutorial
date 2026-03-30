@@ -73,6 +73,8 @@ struct SharedState {
     score2: u32,
     tick: u32,
     game_state: u32,
+    p1_up: u8,
+    p1_down: u8,
     p2_up: u8,
     p2_down: u8,
 }
@@ -364,6 +366,8 @@ fn init_game(state: &mut SharedState, rng: &mut Rng) {
     state.score2 = 0;
     state.tick = 0;
     state.game_state = STATE_WAITING;
+    state.p1_up = 0;
+    state.p1_down = 0;
     state.p2_up = 0;
     state.p2_down = 0;
     reset_ball(state, rng);
@@ -512,44 +516,74 @@ pub fn run() {
 
     init_game(state, &mut rng);
 
-    let pid = crate::fork();
-    if pid < 0 {
-        crate::println!("[pingpong] ERROR: fork failed");
+    // Fork child 1 (player 1 paddle)
+    let pid1 = crate::fork();
+    if pid1 < 0 {
+        crate::println!("[pingpong] ERROR: fork (player 1) failed");
         return;
     }
-
-    if pid == 0 {
-        child_loop(state);
-    } else {
-        crate::println!(
-            "[pingpong] parent PID={}, child PID={}",
-            crate::getpid(),
-            pid
-        );
-        parent_loop(state, &mut rng);
-        let mut exit_code: i32 = 0;
-        crate::waitpid(pid as isize, &mut exit_code);
+    if pid1 == 0 {
+        player_loop(state, 1);
     }
+
+    // Fork child 2 (player 2 paddle)
+    let pid2 = crate::fork();
+    if pid2 < 0 {
+        crate::println!("[pingpong] ERROR: fork (player 2) failed");
+        return;
+    }
+    if pid2 == 0 {
+        player_loop(state, 2);
+    }
+
+    // Parent: coordinator (keyboard + physics + rendering)
+    crate::println!(
+        "[pingpong] parent PID={}, P1 PID={}, P2 PID={}",
+        crate::getpid(),
+        pid1,
+        pid2
+    );
+    parent_loop(state, &mut rng);
+
+    // Wait for both children
+    let mut exit_code: i32 = 0;
+    crate::waitpid(pid1 as isize, &mut exit_code);
+    crate::waitpid(pid2 as isize, &mut exit_code);
 }
 
-fn child_loop(state: &mut SharedState) -> ! {
-    crate::println!("[pingpong] child PID={} (player 2)", crate::getpid());
-    // Child owns paddle 2 movement. Parent writes p2_up/p2_down flags
-    // to shared memory; child reads them, moves paddle2_y, clears flags.
+/// Player subprocess: reads input flags from shared memory, moves paddle.
+fn player_loop(state: &mut SharedState, player: u8) -> ! {
+    crate::println!("[pingpong] player {} PID={}", player, crate::getpid());
     loop {
-        if state.p2_up != 0 {
-            state.paddle2_y -= PADDLE_SPEED;
-            state.p2_up = 0;
+        if player == 1 {
+            if state.p1_up != 0 {
+                state.paddle1_y -= PADDLE_SPEED;
+                state.p1_up = 0;
+            }
+            if state.p1_down != 0 {
+                state.paddle1_y += PADDLE_SPEED;
+                state.p1_down = 0;
+            }
+            state.paddle1_y = clamp(
+                state.paddle1_y,
+                PLAY_TOP + 4,
+                PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
+            );
+        } else {
+            if state.p2_up != 0 {
+                state.paddle2_y -= PADDLE_SPEED;
+                state.p2_up = 0;
+            }
+            if state.p2_down != 0 {
+                state.paddle2_y += PADDLE_SPEED;
+                state.p2_down = 0;
+            }
+            state.paddle2_y = clamp(
+                state.paddle2_y,
+                PLAY_TOP + 4,
+                PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
+            );
         }
-        if state.p2_down != 0 {
-            state.paddle2_y += PADDLE_SPEED;
-            state.p2_down = 0;
-        }
-        state.paddle2_y = clamp(
-            state.paddle2_y,
-            PLAY_TOP + 4,
-            PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
-        );
         if state.game_state == STATE_GAME_OVER && state.tick == u32::MAX {
             crate::exit(0);
             unreachable!();
@@ -596,21 +630,10 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 }
             }
             STATE_PLAYING => {
-                // Parent moves paddle 1 directly
-                if keys.w {
-                    state.paddle1_y -= PADDLE_SPEED;
-                }
-                if keys.s {
-                    state.paddle1_y += PADDLE_SPEED;
-                }
-                state.paddle1_y = clamp(
-                    state.paddle1_y,
-                    PLAY_TOP + 4,
-                    PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
-                );
-
-                // Parent writes P2 held-state to shared memory;
-                // child process reads it and moves paddle2_y
+                // Parent writes held-state to shared memory;
+                // child processes read flags and move their paddles
+                state.p1_up = keys.w as u8;
+                state.p1_down = keys.s as u8;
                 state.p2_up = keys.up as u8;
                 state.p2_down = keys.down as u8;
 
