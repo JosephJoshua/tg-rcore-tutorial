@@ -431,21 +431,22 @@ fn draw_hud(game: &mut Game) {
     draw_string(hx, cy + dy * 4, b"F9", TEXT_KEY);
 }
 
+const FLASH_COLOR: [u8; 4] = [0x30, 0xE0, 0x30, 0xFF]; // bright green
+
 fn draw_flash_msg(game: &Game) {
-    let hx = PLAY_X + PLAY_W + 30;
-    let fy = PLAY_Y + 30;
-    draw_rect(hx, fy, 130, 22, BG);
-    if game.flash_msg == 1 {
-        draw_string(hx, fy, b"SAVED", TEXT_KEY);
-    } else if game.flash_msg == 2 {
-        draw_string(hx, fy, b"LOADED", TEXT_KEY);
-    }
+    let msg: &[u8] = if game.flash_msg == 1 { b"SAVED" } else { b"LOADED" };
+    let tw = msg.len() * CHAR_PX_W;
+    let fx = PLAY_X + (PLAY_W - tw) / 2;
+    let fy = PLAY_Y + PLAY_H / 2 - 10;
+    draw_string(fx, fy, msg, FLASH_COLOR);
 }
 
-fn erase_flash_msg() {
-    let hx = PLAY_X + PLAY_W + 30;
-    let fy = PLAY_Y + 30;
-    draw_rect(hx, fy, 130, 22, BG);
+fn erase_flash_msg(game: &Game) {
+    let msg: &[u8] = if game.flash_msg == 1 { b"SAVED" } else { b"LOADED" };
+    let tw = msg.len() * CHAR_PX_W;
+    let fx = PLAY_X + (PLAY_W - tw) / 2;
+    let fy = PLAY_Y + PLAY_H / 2 - 10;
+    draw_rect(fx, fy, tw, GLYPH_H * FONT_SCALE, PLAY_BG);
 }
 
 fn draw_initial_screen(game: &mut Game) {
@@ -774,7 +775,7 @@ pub fn run_game() {
                         if game.flash_timer == 29 {
                             draw_flash_msg(&game);
                         } else if game.flash_timer == 0 {
-                            erase_flash_msg();
+                            erase_flash_msg(&game);
                         }
                     }
 
