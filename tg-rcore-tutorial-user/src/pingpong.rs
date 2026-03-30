@@ -571,6 +571,8 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
 
     let mut keys = KeyState::new();
     let mut game_over_drawn = false;
+    let mut point_scored_drawn = false;
+    let mut pause_timer: u32 = 0;
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
     // Ball trail: 2 previous positions
@@ -614,12 +616,54 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 update_physics(state, rng);
             }
             STATE_POINT_SCORED => {
-                if keys.any_pressed {
+                if !point_scored_drawn {
+                    // Flash the updated score
+                    draw_score(state.score1, state.score2);
+                    prev_score1 = state.score1;
+                    prev_score2 = state.score2;
+                    // Erase ball from field
+                    erase_ball_area(prev_ball_x, prev_ball_y);
+                    erase_ball_area(trail1_x, trail1_y);
+                    erase_ball_area(trail2_x, trail2_y);
+                    fb_flush();
+                    point_scored_drawn = true;
+                    pause_timer = 80; // ~80 scheduler ticks pause
+                }
+                if pause_timer > 0 {
+                    pause_timer -= 1;
+                    // Flash score: alternate between bright and dim every 10 ticks
+                    if pause_timer % 20 == 10 {
+                        let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
+                        let scale = 2;
+                        let dw = DIGIT_W * scale;
+                        let dh = DIGIT_H * scale;
+                        let sy = PLAY_TOP + 15;
+                        fill_rect(cx - dw - 30, sy - 2, dw * 2 + 60, dh + 4, BG_FIELD);
+                        fb_flush();
+                    } else if pause_timer % 20 == 0 {
+                        draw_score(state.score1, state.score2);
+                        fb_flush();
+                    }
+                } else {
+                    point_scored_drawn = false;
                     state.game_state = STATE_PLAYING;
+                    // Reset trail to ball center
+                    prev_ball_x = state.ball_x / FP_ONE;
+                    prev_ball_y = state.ball_y / FP_ONE;
+                    trail1_x = prev_ball_x;
+                    trail1_y = prev_ball_y;
+                    trail2_x = prev_ball_x;
+                    trail2_y = prev_ball_y;
                 }
             }
             STATE_GAME_OVER => {
                 if !game_over_drawn {
+                    // Erase ball
+                    erase_ball_area(prev_ball_x, prev_ball_y);
+                    erase_ball_area(trail1_x, trail1_y);
+                    erase_ball_area(trail2_x, trail2_y);
+                    // Draw final score
+                    draw_score(state.score1, state.score2);
                     let winner = if state.score1 >= WIN_SCORE { 1 } else { 2 };
                     draw_game_over(winner);
                     fb_flush();
@@ -653,7 +697,12 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
             _ => {}
         }
 
-        // ─── Rendering ───
+        // ─── Rendering (skip during pause/game-over) ───
+        if state.game_state == STATE_POINT_SCORED || state.game_state == STATE_GAME_OVER {
+            state.tick = state.tick.wrapping_add(1);
+            crate::sched_yield();
+            continue;
+        }
         let ball_x = state.ball_x / FP_ONE;
         let ball_y = state.ball_y / FP_ONE;
         let ball_moved = ball_x != prev_ball_x || ball_y != prev_ball_y;
