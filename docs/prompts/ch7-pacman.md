@@ -353,24 +353,159 @@ Tick flow:
 
 This creates a clean lockstep: parent and ghosts alternate in sync. No need for shared memory or explicit synchronization. The pipe's blocking read/write IS the synchronization mechanism.
 
-### Rendering
+### Visual Design — "Warm Arcade Phosphor"
 
-- **Incremental**: only redraw changed cells (eaten dot → black, moved character → erase old + draw new)
-- **Full redraw** on level start, game restart, and after load
-- **Color scheme**: Neon arcade (consistent with ch4-tetris, ch5-pingpong, ch6-breakout)
-  - Background (outside maze): deep void #040612
-  - Walls: deep blue #0000CC with #000044 glow border (draw wall cell as a filled blue rect with 1px darker outline)
-  - Paths: black #000000
-  - Dots: warm yellow-white #FFEEAA, 4x4 at cell center
-  - Power pellets: bright white #FFFFFF, 10x10, pulsing (draw/erase every 500ms)
-  - Pac-Man: neon yellow #FFE000, 20x20 filled square (simple — no mouth animation needed)
-  - Blinky: #FF0000 red, Pinky: #FFB8FF pink, Inky: #00FFFF cyan, Clyde: #FFB852 orange
-  - Frightened ghosts: #2222FF blue body, #FFFFFF white eyes. Flash white/blue in last 2 seconds.
-  - Eaten ghost (eyes only): two white 4x4 squares where eyes would be, moving toward ghost house
-  - Score/lives HUD: neon green #00FF66 text (7-segment digits)
-- **Character rendering**: each character is a filled colored square (20x20) with 2x2 "eye" dots for ghosts. Simple but readable at VNC resolution.
-- **Death animation**: Pac-Man shrinks from 20x20 → 16x16 → 12x12 → 8x8 → 4x4 → gone over 1 second (erase and redraw smaller each 200ms).
-- **Level complete animation**: alternate maze walls between blue and white, 3 times over 2 seconds.
+A deliberate departure from the cold neon palette used in ch4-ch6. Pac-Man's visuals should evoke the warm, saturated glow of a real CRT arcade cabinet — rich blues, golden yellows, and candy-bright characters that feel like they're burning into phosphor.
+
+**BGRA Color Palette** (all colors in BGRA byte order for `fill_rect`):
+
+```
+// ─── Environment ───
+BG_VOID:      [0x00, 0x00, 0x00, 0xFF]  // #000000 true black outside maze
+PATH_COLOR:   [0x08, 0x08, 0x08, 0xFF]  // #080808 near-black paths (not pure black — slight warmth)
+WALL_FACE:    [0xDE, 0x21, 0x21, 0xFF]  // #2121DE rich cobalt blue (classic Pac-Man)
+WALL_EDGE:    [0xFF, 0x52, 0x52, 0xFF]  // #5252FF brighter blue edge highlight
+WALL_SHADOW:  [0x80, 0x10, 0x10, 0xFF]  // #1010C0 dark blue shadow
+GATE_COLOR:   [0xB4, 0x69, 0xFF, 0xFF]  // #FF69B4 hot pink ghost house gate
+
+// ─── Collectibles ───
+DOT_COLOR:    [0x97, 0xB8, 0xFF, 0xFF]  // #FFB897 warm peach-salmon dots
+PELLET_COLOR: [0xD0, 0xFF, 0xFF, 0xFF]  // #FFFFD0 warm white power pellets
+PELLET_GLOW:  [0x60, 0x80, 0x80, 0xFF]  // #808060 subtle pellet aura
+FRUIT_CHERRY: [0x33, 0x33, 0xFF, 0xFF]  // #FF3333 cherry red
+FRUIT_STRAW:  [0x55, 0x88, 0xFF, 0xFF]  // #FF8855 strawberry
+FRUIT_ORANGE: [0x22, 0xAA, 0xFF, 0xFF]  // #FFAA22 orange
+
+// ─── Pac-Man ───
+PAC_BODY:     [0x00, 0xD7, 0xFF, 0xFF]  // #FFD700 rich golden yellow
+PAC_HIGHLIGHT:[0x44, 0xEE, 0xFF, 0xFF]  // #FFEE44 lighter center highlight
+PAC_DEATH1:   [0x00, 0xAA, 0xFF, 0xFF]  // #FFAA00 orange (dying phase 1)
+PAC_DEATH2:   [0x00, 0x44, 0xFF, 0xFF]  // #FF4400 red-orange (dying phase 2)
+
+// ─── Ghosts ───
+BLINKY_BODY:  [0x00, 0x00, 0xFF, 0xFF]  // #FF0000 true red
+BLINKY_LIGHT: [0x44, 0x44, 0xFF, 0xFF]  // #FF4444 lighter red highlight
+PINKY_BODY:   [0xC0, 0x80, 0xFF, 0xFF]  // #FF80C0 candy pink
+PINKY_LIGHT:  [0xDD, 0xAA, 0xFF, 0xFF]  // #FFAADD lighter pink
+INKY_BODY:    [0xDE, 0xFF, 0x00, 0xFF]  // #00FFDE electric cyan
+INKY_LIGHT:   [0xEE, 0xFF, 0x66, 0xFF]  // #66FFEE lighter cyan
+CLYDE_BODY:   [0x52, 0xB8, 0xFF, 0xFF]  // #FFB852 warm amber orange
+CLYDE_LIGHT:  [0x88, 0xDD, 0xFF, 0xFF]  // #FFDD88 lighter orange
+GHOST_EYE_W:  [0xFF, 0xFF, 0xFF, 0xFF]  // #FFFFFF white eye outer
+GHOST_EYE_B:  [0x88, 0x22, 0x22, 0xFF]  // #222288 dark blue pupil (looks toward movement dir)
+FRIGHT_BODY:  [0xB8, 0x18, 0x18, 0xFF]  // #1818B8 deep indigo
+FRIGHT_FACE:  [0xFF, 0xFF, 0xFF, 0xFF]  // #FFFFFF white eyes+mouth in fright
+FRIGHT_FLASH: [0xEE, 0xEE, 0xEE, 0xFF]  // #EEEEEE near-white (flash phase)
+
+// ─── HUD ───
+HUD_BG:       [0x0A, 0x06, 0x04, 0xFF]  // #04060A very deep blue-black panel
+HUD_LABEL:    [0x88, 0x88, 0x88, 0xFF]  // #888888 muted gray labels
+HUD_SCORE:    [0xD0, 0xFF, 0xFF, 0xFF]  // #FFFFD0 warm cream score digits
+HUD_HISCORE:  [0x66, 0xFF, 0x00, 0xFF]  // #00FF66 green high score
+HUD_LIVES:    [0x00, 0xD7, 0xFF, 0xFF]  // #FFD700 same gold as Pac-Man
+```
+
+**Wall rendering — beveled 3D channels**:
+
+Each wall cell (28x28) is drawn with a beveled effect to create the classic "maze of light" look:
+```
+For each wall cell at (cx, cy):
+  1. Fill entire cell with WALL_SHADOW (dark blue base)
+  2. Check which edges face a path/dot cell:
+     - If neighbor above is path: draw 2px WALL_EDGE strip along top
+     - If neighbor below is path: draw 2px WALL_EDGE strip along bottom
+     - If neighbor left is path: draw 2px WALL_EDGE strip along left
+     - If neighbor right is path: draw 2px WALL_EDGE strip along right
+  3. Fill interior (inset 2px from edges) with WALL_FACE
+```
+This creates glowing blue walls where only the edges facing open corridors are bright, making the maze look like luminous channels carved into darkness. Interior walls with no path neighbors render as solid dark blue.
+
+**Character rendering**:
+
+Each character occupies a 20x20 area centered in a 28x28 cell (4px padding each side).
+
+*Pac-Man* (20x20):
+```
+Fill 20x20 with PAC_BODY (golden yellow)
+Fill inner 12x12 centered with PAC_HIGHLIGHT (brighter yellow)
+```
+No mouth animation needed — the highlight creates visual interest. When moving, a 2px darker "shadow" trail on the trailing edge sells the motion.
+
+*Ghosts* (20x20):
+```
+Fill 20x20 with ghost body color (BLINKY_BODY etc.)
+Fill top 12x12 centered with ghost light color (highlight — gives roundedness)
+Draw eyes: two 6x6 white rects at (4,4) and (12,4)
+Draw pupils: two 3x3 dark rects inside eyes, offset toward movement direction
+  - Moving right: pupils at right edge of eyes
+  - Moving left: pupils at left edge
+  - Moving up: pupils at top edge
+  - Moving down: pupils at bottom edge
+Bottom edge: draw 3 "bumps" (alternating 4px strips of body color and darker shade)
+  to suggest the wavy ghost skirt
+```
+
+*Frightened ghost* (20x20):
+```
+Fill 20x20 with FRIGHT_BODY (deep indigo)
+Draw two 4x4 FRIGHT_FACE white eye dots
+Draw wavy "mouth" — 6 alternating 2x2 white dots in a zigzag at y=14
+```
+During flash phase (last 2 seconds), alternate between FRIGHT_BODY and FRIGHT_FLASH every 250ms.
+
+*Eaten ghost — eyes only*:
+```
+Just the two 6x6 white eye rects with pupils, on a black background.
+Moving toward ghost house at double speed.
+```
+
+**Dot rendering**: 4x4 DOT_COLOR square at cell center. Warm peach tone is distinctive and visible against black paths.
+
+**Power pellet rendering**: 10x10 PELLET_COLOR square at cell center, with a 14x14 PELLET_GLOW behind it. Pulsing: alternate between drawn and erased every 500ms (use `get_time()` check).
+
+**Fruit rendering**: 12x12 colored square at cell center. Cherry: red square with 2x4 green stem on top. Strawberry: red-orange triangle approximation (wider at top). Orange: orange square.
+
+**Death animation** — warm fade:
+```
+Phase 1 (0-200ms):  20x20 PAC_BODY (normal)
+Phase 2 (200-400ms): 16x16 PAC_DEATH1 (orange, shrinking)
+Phase 3 (400-600ms): 12x12 PAC_DEATH2 (red-orange, smaller)
+Phase 4 (600-800ms): 8x8 PAC_DEATH2 (red, small)
+Phase 5 (800-1000ms): 4x4 WALL_EDGE (blue flash, vanishing)
+Phase 6: gone (erase cell)
+```
+
+**Level complete animation**: maze walls flash between WALL_FACE and FRIGHT_FLASH (white), 3 cycles over 2 seconds. Characters frozen in place. Creates a satisfying "level clear" strobe.
+
+**HUD panel** (right side, x=640..1240, full height):
+```
+y=30:   "1UP" label in HUD_LABEL, then current score in HUD_SCORE (large 2x 7-seg digits)
+y=120:  "HIGH SCORE" label in HUD_LABEL, then high score in HUD_HISCORE (green)
+y=210:  "LEVEL" label + level number in HUD_SCORE
+y=280:  Lives: row of small Pac-Man icons (12x12 PAC_BODY), one per remaining life
+y=340:  Current fruit icon for this level
+y=420:  Ghost roster: 4 colored dots (8x8) showing ghost status:
+        - Solid color = active, Blue = frightened, Gray = in ghost house, Eyes icon = eaten
+```
+Panel bordered on left by a 2px WALL_EDGE vertical line.
+
+**"READY!" text**: Rendered in PELLET_COLOR using the 7-segment font at 2x scale, centered in the maze area below the ghost house. Displayed for 2 seconds at level start.
+
+**"GAME OVER" text**: Rendered in BLINKY_BODY (red) at 2x scale, centered in maze. Background cells behind it darkened.
+
+**Rendering order** (back to front):
+1. Path cells (black)
+2. Dots and power pellets
+3. Fruit (if visible)
+4. Ghosts (drawn in order: Clyde, Inky, Pinky, Blinky — so Blinky is on top, matching classic game)
+5. Pac-Man (always on top of ghosts for collision visibility)
+
+**Incremental rendering rules**:
+- Moving character: erase old cell (redraw path + dot if dot was there), draw character at new cell
+- Eaten dot: redraw cell as empty path
+- Ghost mode change: redraw ghost at current position with new colors
+- Score change: erase and redraw only the changed digits in HUD
+- Full redraw only on: level start, game restart, load from file
 
 ## Lessons Learned from ch1-ch6 (apply ALL of these)
 
