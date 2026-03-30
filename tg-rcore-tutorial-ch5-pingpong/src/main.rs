@@ -728,10 +728,19 @@ mod impls {
                                 (*p).as_mut()
                             };
                             if let Some(kbd) = keyboard {
-                                if let Some(event) = kbd.pop_pending_event() {
-                                    if event.event_type == 1 && event.value == 1 && event.code < 256 {
-                                        unsafe { *ptr.as_mut() = event.code as u8 };
-                                        return 1;
+                                // Drain non-keypress events (syncs, releases) until we
+                                // find an actual key-down or exhaust the queue.
+                                // VNC keyboards generate ~4 events per keypress.
+                                loop {
+                                    match kbd.pop_pending_event() {
+                                        Some(event) => {
+                                            if event.event_type == 1 && event.value == 1 && event.code < 256 {
+                                                unsafe { *ptr.as_mut() = event.code as u8 };
+                                                return 1;
+                                            }
+                                            // Not a key-down — keep draining
+                                        }
+                                        None => return 0,
                                     }
                                 }
                             }
