@@ -59,6 +59,7 @@ mod virtio_block;
 mod allocator;
 /// VirtIO GPU and keyboard driver module
 #[cfg(target_arch = "riscv64")]
+#[allow(dead_code)]
 mod virtio;
 
 #[macro_use]
