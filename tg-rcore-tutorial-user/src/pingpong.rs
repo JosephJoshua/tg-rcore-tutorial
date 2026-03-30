@@ -272,13 +272,45 @@ fn init_game(state: &mut SharedState, rng: &mut Rng) {
     reset_ball(state, rng);
 }
 
-fn poll_key() -> u8 {
-    let mut buf = [0u8; 1];
-    let ret = crate::read(crate::STDIN_BUFFERED, &mut buf);
-    if ret > 0 {
-        buf[0]
-    } else {
-        0
+/// Held-key state for both players.
+struct KeyState {
+    w: bool,
+    s: bool,
+    up: bool,
+    down: bool,
+    any_pressed: bool, // true if any key was pressed this frame
+}
+
+impl KeyState {
+    fn new() -> Self {
+        Self { w: false, s: false, up: false, down: false, any_pressed: false }
+    }
+
+    /// Drain all pending keyboard events and update held state.
+    /// Kernel returns: keycode for press, keycode|0x80 for release.
+    fn update(&mut self) {
+        self.any_pressed = false;
+        loop {
+            let mut buf = [0u8; 1];
+            let ret = crate::read(crate::STDIN_BUFFERED, &mut buf);
+            if ret <= 0 {
+                break;
+            }
+            let byte = buf[0];
+            let released = byte & 0x80 != 0;
+            let code = byte & 0x7F;
+            let held = !released;
+            match code {
+                KEY_W => self.w = held,
+                KEY_S => self.s = held,
+                KEY_UP => self.up = held,
+                KEY_DOWN => self.down = held,
+                _ => {}
+            }
+            if held {
+                self.any_pressed = true;
+            }
+        }
     }
 }
 
@@ -405,17 +437,9 @@ pub fn run() {
 
 fn child_loop(state: &mut SharedState) -> ! {
     crate::println!("[pingpong] child PID={} (player 2)", crate::getpid());
+    // Child just stays alive — parent handles all input via shared keyboard.
+    // Shared memory is still used: parent writes paddle2_y, child observes game_state.
     loop {
-        let key = poll_key();
-        match key {
-            KEY_UP => {
-                state.p2_up = 1;
-            }
-            KEY_DOWN => {
-                state.p2_down = 1;
-            }
-            _ => {}
-        }
         if state.game_state == STATE_GAME_OVER && state.tick == u32::MAX {
             crate::exit(0);
             unreachable!();
@@ -433,6 +457,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     draw_paddle(PADDLE2_X, state.paddle2_y);
     fb_flush();
 
+    let mut keys = KeyState::new();
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
     let mut prev_paddle1_y = state.paddle1_y;
@@ -441,24 +466,21 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     let mut prev_score2 = state.score2;
 
     loop {
-        let key = poll_key();
+        keys.update(); // drain all pending keyboard events
 
         match state.game_state {
             STATE_WAITING => {
-                if key != 0 {
+                if keys.any_pressed {
                     state.game_state = STATE_PLAYING;
-                    erase_message_area();
                 }
             }
             STATE_PLAYING => {
-                match key {
-                    KEY_W => {
-                        state.paddle1_y -= PADDLE_SPEED;
-                    }
-                    KEY_S => {
-                        state.paddle1_y += PADDLE_SPEED;
-                    }
-                    _ => {}
+                // Move paddles based on held keys — every frame, not just on events
+                if keys.w {
+                    state.paddle1_y -= PADDLE_SPEED;
+                }
+                if keys.s {
+                    state.paddle1_y += PADDLE_SPEED;
                 }
                 state.paddle1_y = clamp(
                     state.paddle1_y,
@@ -466,13 +488,11 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                     PLAY_BOTTOM - 4 - PADDLE_HEIGHT,
                 );
 
-                if state.p2_up != 0 {
+                if keys.up {
                     state.paddle2_y -= PADDLE_SPEED;
-                    state.p2_up = 0;
                 }
-                if state.p2_down != 0 {
+                if keys.down {
                     state.paddle2_y += PADDLE_SPEED;
-                    state.p2_down = 0;
                 }
                 state.paddle2_y = clamp(
                     state.paddle2_y,
@@ -483,14 +503,12 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 update_physics(state, rng);
             }
             STATE_POINT_SCORED => {
-                if key != 0 {
+                if keys.any_pressed {
                     state.game_state = STATE_PLAYING;
-                    erase_message_area();
                 }
             }
             STATE_GAME_OVER => {
-                if key != 0 {
-                    erase_message_area();
+                if keys.any_pressed {
                     init_game(state, rng);
                     draw_background();
                     draw_score(0, 0);
@@ -502,27 +520,31 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
             _ => {}
         }
 
-        // Incremental rendering
+        // ─── Rendering ───
+        // Always redraw paddles to fix overlap artifacts with ball
         let ball_x = state.ball_x / FP_ONE;
         let ball_y = state.ball_y / FP_ONE;
         if ball_x != prev_ball_x || ball_y != prev_ball_y {
             erase_ball(prev_ball_x, prev_ball_y);
-            draw_ball(ball_x, ball_y);
             prev_ball_x = ball_x;
             prev_ball_y = ball_y;
         }
 
+        // Redraw paddles if they moved (erase old, draw new)
         if state.paddle1_y != prev_paddle1_y {
             erase_paddle(PADDLE1_X, prev_paddle1_y);
-            draw_paddle(PADDLE1_X, state.paddle1_y);
             prev_paddle1_y = state.paddle1_y;
         }
+        draw_paddle(PADDLE1_X, state.paddle1_y);
 
         if state.paddle2_y != prev_paddle2_y {
             erase_paddle(PADDLE2_X, prev_paddle2_y);
-            draw_paddle(PADDLE2_X, state.paddle2_y);
             prev_paddle2_y = state.paddle2_y;
         }
+        draw_paddle(PADDLE2_X, state.paddle2_y);
+
+        // Draw ball on top of everything
+        draw_ball(ball_x, ball_y);
 
         if state.score1 != prev_score1 || state.score2 != prev_score2 {
             draw_score(state.score1, state.score2);
@@ -530,7 +552,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
             prev_score2 = state.score2;
         }
 
-        fb_flush(); // one flush per frame
+        fb_flush();
         state.tick = state.tick.wrapping_add(1);
         crate::sched_yield();
     }

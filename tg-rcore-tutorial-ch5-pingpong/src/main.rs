@@ -741,16 +741,18 @@ mod impls {
                                 (*p).as_mut()
                             };
                             if let Some(kbd) = keyboard {
-                                // Drain non-keypress events (syncs, releases) until we
-                                // find an actual key-down or exhaust the queue.
+                                // Drain sync events, return key press/release.
+                                // Encoding: keycode (0-127) for press, keycode|0x80 for release.
                                 loop {
                                     match kbd.pop_pending_event() {
                                         Some(event) => {
-                                            if event.event_type == 1 && event.value == 1 && event.code < 256 {
-                                                unsafe { *ptr.as_mut() = event.code as u8 };
+                                            if event.event_type == 1 && event.code < 128 {
+                                                let code = event.code as u8;
+                                                let byte = if event.value == 0 { code | 0x80 } else { code };
+                                                unsafe { *ptr.as_mut() = byte };
                                                 return 1;
                                             }
-                                            // Not a key-down — keep draining
+                                            // Sync or other event — keep draining
                                         }
                                         None => return 0,
                                     }
