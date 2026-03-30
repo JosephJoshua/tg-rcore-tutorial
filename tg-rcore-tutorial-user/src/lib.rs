@@ -43,7 +43,7 @@ pub fn fb_info() -> (u32, u32) {
 }
 
 /// Write a rectangular BGRA pixel region to the kernel framebuffer.
-/// The kernel copies the data and flushes the display.
+/// Does NOT flush — call `fb_flush()` after all writes for the frame.
 pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
     let ret: isize;
     unsafe {
@@ -58,6 +58,18 @@ pub fn fb_write(x: u32, y: u32, w: u32, h: u32, data: *const u8) -> isize {
         );
     }
     ret
+}
+
+/// Flush the GPU framebuffer to the display.
+/// Call once per frame after all fb_write calls.
+pub fn fb_flush() {
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 2002usize,
+            lateout("a0") _,
+        );
+    }
 }
 
 #[unsafe(no_mangle)]

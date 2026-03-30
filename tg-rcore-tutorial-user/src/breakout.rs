@@ -1,6 +1,6 @@
 //! Breakout (brick-breaker) game for ch6: VirtIO GPU rendering with file-based save/load.
 
-use crate::{close, fb_info, fb_write, get_time, open, read, sched_yield, sleep, write, OpenFlags, STDIN};
+use crate::{close, fb_flush, fb_info, fb_write, get_time, open, read, sched_yield, sleep, write, OpenFlags, STDIN};
 
 // ========== Layout ==========
 
@@ -59,7 +59,7 @@ const GLYPH_H: usize = 7;
 const FONT_SCALE: usize = 3;
 const CHAR_PX_W: usize = GLYPH_W * FONT_SCALE + 2;
 
-const GLYPHS: [(u8, [u8; 7]); 33] = [
+const GLYPHS: [(u8, [u8; 7]); 35] = [
     (b'0', [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110]),
     (b'1', [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110]),
     (b'2', [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111]),
@@ -71,6 +71,7 @@ const GLYPHS: [(u8, [u8; 7]); 33] = [
     (b'8', [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110]),
     (b'9', [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b10001, 0b01110]),
     (b'A', [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001]),
+    (b'B', [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110]),
     (b'C', [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110]),
     (b'D', [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110]),
     (b'E', [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111]),
@@ -87,6 +88,7 @@ const GLYPHS: [(u8, [u8; 7]); 33] = [
     (b'R', [0b11110, 0b10001, 0b10001, 0b11110, 0b10010, 0b10001, 0b10001]),
     (b'S', [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110]),
     (b'T', [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100]),
+    (b'U', [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110]),
     (b'V', [0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b01010, 0b00100]),
     (b'W', [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001]),
     (b'X', [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001]),
@@ -204,6 +206,9 @@ struct Game {
     bricks_destroyed: u32,
     flash_timer: i32,
     flash_msg: u8, // 0=none, 1=SAVED, 2=LOADED
+    prev_score: u32,
+    prev_lives: u32,
+    prev_level: u32,
 }
 
 impl Game {
@@ -222,6 +227,9 @@ impl Game {
             bricks_destroyed: 0,
             flash_timer: 0,
             flash_msg: 0,
+            prev_score: u32::MAX,
+            prev_lives: u32::MAX,
+            prev_level: u32::MAX,
         }
     }
 
@@ -376,7 +384,13 @@ fn draw_all_bricks(game: &Game) {
     }
 }
 
-fn draw_hud_values(game: &Game) {
+fn draw_hud_values(game: &mut Game) {
+    if game.score == game.prev_score
+        && game.lives == game.prev_lives
+        && game.level == game.prev_level
+    {
+        return;
+    }
     let hx = PLAY_X + PLAY_W + 30;
     let hy = PLAY_Y + 60;
     // Clear value areas
@@ -387,9 +401,12 @@ fn draw_hud_values(game: &Game) {
     draw_number(hx, hy + 25, game.score, TEXT_VALUE);
     draw_number(hx, hy + 85, game.lives, TEXT_VALUE);
     draw_number(hx, hy + 145, game.level, TEXT_VALUE);
+    game.prev_score = game.score;
+    game.prev_lives = game.lives;
+    game.prev_level = game.level;
 }
 
-fn draw_hud(game: &Game) {
+fn draw_hud(game: &mut Game) {
     let hx = PLAY_X + PLAY_W + 30;
     let hy = PLAY_Y + 60;
 
@@ -403,15 +420,15 @@ fn draw_hud(game: &Game) {
     // Controls
     let cy = hy + 200;
     draw_string(hx, cy, b"CONTROLS", TEXT_DIM);
-    let dy = 28;
+    let dy = 26;
+    draw_string(hx, cy + dy, b"A D  MOVE", TEXT_DIM);
     draw_string(hx, cy + dy, b"A D", TEXT_KEY);
-    draw_string(hx + CHAR_PX_W * 4, cy + dy, b"MOVE", TEXT_DIM);
-    draw_string(hx, cy + dy * 2, b"SPACE", TEXT_KEY);
-    draw_string(hx + CHAR_PX_W * 6, cy + dy * 2, b"LAUNCH", TEXT_DIM);
+    draw_string(hx, cy + dy * 2, b"SPC  LAUNCH", TEXT_DIM);
+    draw_string(hx, cy + dy * 2, b"SPC", TEXT_KEY);
+    draw_string(hx, cy + dy * 3, b"F5   SAVE", TEXT_DIM);
     draw_string(hx, cy + dy * 3, b"F5", TEXT_KEY);
-    draw_string(hx + CHAR_PX_W * 3, cy + dy * 3, b"SAVE", TEXT_DIM);
+    draw_string(hx, cy + dy * 4, b"F9   LOAD", TEXT_DIM);
     draw_string(hx, cy + dy * 4, b"F9", TEXT_KEY);
-    draw_string(hx + CHAR_PX_W * 3, cy + dy * 4, b"LOAD", TEXT_DIM);
 }
 
 fn draw_flash_msg(game: &Game) {
@@ -431,7 +448,7 @@ fn erase_flash_msg() {
     draw_rect(hx, fy, 130, 22, BG);
 }
 
-fn draw_initial_screen(game: &Game) {
+fn draw_initial_screen(game: &mut Game) {
     // Clear entire screen
     draw_rect(0, 0, 1280, 800, BG);
 
@@ -459,6 +476,7 @@ fn draw_initial_screen(game: &Game) {
 
     // HUD
     draw_hud(game);
+    fb_flush();
 }
 
 fn draw_game_over(game: &Game) {
@@ -624,11 +642,15 @@ fn update_physics(game: &mut Game) {
         game.ball_x = game.attached_ball_x();
         game.ball_y = game.attached_ball_y();
         // Full redraw for new level
+        game.prev_score = u32::MAX;
+        game.prev_lives = u32::MAX;
+        game.prev_level = u32::MAX;
         draw_rect(PLAY_X, PLAY_Y, PLAY_W, PLAY_H, PLAY_BG);
         draw_all_bricks(game);
         draw_paddle(game);
         draw_ball(game);
         draw_hud_values(game);
+        fb_flush();
     }
 }
 
@@ -693,6 +715,9 @@ fn drain_input(game: &mut Game) {
             Some(b'\x09') => {
                 // F9 = load
                 if load_game(game) {
+                    game.prev_score = u32::MAX;
+                    game.prev_lives = u32::MAX;
+                    game.prev_level = u32::MAX;
                     draw_initial_screen(game);
                     game.flash_msg = 2;
                     game.flash_timer = 30;
@@ -714,7 +739,7 @@ pub fn run_game() {
     let _ = fb_info();
     loop {
         let mut game = Game::new();
-        draw_initial_screen(&game);
+        draw_initial_screen(&mut game);
         let mut last_tick = get_time();
         let mut game_over = false;
 
@@ -741,7 +766,7 @@ pub fn run_game() {
                     draw_ball(&game);
 
                     // Update HUD if score changed
-                    draw_hud_values(&game);
+                    draw_hud_values(&mut game);
 
                     // Flash message countdown
                     if game.flash_timer > 0 {
@@ -758,6 +783,8 @@ pub fn run_game() {
                         game_over = true;
                         draw_game_over(&game);
                     }
+
+                    fb_flush();
                 } else {
                     // Wait for Enter to restart
                     if poll_key() == Some(b'\r') {

@@ -169,6 +169,8 @@ pub const MMIO: &[(usize, usize)] = &[
 const SYSCALL_FB_INFO: usize = 2000;
 /// Write pixels to framebuffer.
 const SYSCALL_FB_WRITE: usize = 2001;
+/// Flush GPU display.
+const SYSCALL_FB_FLUSH: usize = 2002;
 
 /// Global GPU driver.
 #[cfg(target_arch = "riscv64")]
@@ -271,6 +273,12 @@ extern "C" fn rust_main() -> ! {
                         }
                         SYSCALL_FB_WRITE => {
                             let ret = handle_fb_write(args[0], args[1], args[2], args[3], args[4]);
+                            *ctx.a_mut(0) = ret;
+                            unsafe { (*processor).make_current_suspend() };
+                            continue;
+                        }
+                        SYSCALL_FB_FLUSH => {
+                            let ret = handle_fb_flush();
                             *ctx.a_mut(0) = ret;
                             unsafe { (*processor).make_current_suspend() };
                             continue;
@@ -431,7 +439,8 @@ fn handle_fb_info() -> usize {
     ((width as usize) << 32) | (height as usize)
 }
 
-/// FB_WRITE: copy BGRA pixels from user buffer into framebuffer and flush.
+/// FB_WRITE: copy BGRA pixels from user buffer into framebuffer (no flush).
+/// Call FB_FLUSH separately to update the display.
 #[cfg(target_arch = "riscv64")]
 fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> usize {
     use tg_kernel_vm::page_table::VmFlags;
@@ -472,12 +481,17 @@ fn handle_fb_write(x: usize, y: usize, w: usize, h: usize, data_ptr: usize) -> u
         }
     }
 
+    0
+}
+
+/// FB_FLUSH: flush the GPU framebuffer to the display.
+#[cfg(target_arch = "riscv64")]
+fn handle_fb_flush() -> usize {
     let gpu = unsafe {
         let p = &raw mut GPU;
         (*p).as_mut().expect("GPU not initialized")
     };
     gpu.flush().expect("GPU flush failed");
-
     0
 }
 
