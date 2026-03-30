@@ -1419,25 +1419,20 @@ pub fn run_game() {
     crate::println!("Pac-Man starting...");
 
     // Seed RNG
-    crate::println!("[pacman] seeding rng");
     seed_rng(get_time() as u32);
 
     // Get framebuffer info
-    crate::println!("[pacman] fb_info");
     let (_fb_w, _fb_h) = fb_info();
 
     // Load high score
-    crate::println!("[pacman] load_high_score");
     let high_score = load_high_score();
 
     // Initialize game state (use static to keep ~700 bytes off the stack)
-    crate::println!("[pacman] Game::reset");
     let game = unsafe { &mut *(&raw mut GAME) };
     game.reset();
     game.high_score = high_score;
 
     // Clear screen
-    crate::println!("[pacman] fill_rect clear screen");
     fill_rect(0, 0, FB_W, FB_H, BG_VOID);
 
     // Draw initial maze
