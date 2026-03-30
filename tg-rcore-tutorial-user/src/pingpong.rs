@@ -29,15 +29,21 @@ const FP_ONE: i32 = 1 << FP_SHIFT;
 
 const WIN_SCORE: u32 = 5;
 
-// Colors (BGRA format)
-const BG_COLOR: [u8; 4] = [0x1A, 0x0D, 0x0D, 0xFF];
-const WALL_COLOR: [u8; 4] = [0x4E, 0x3E, 0x2E, 0xFF];
-const PADDLE_COLOR: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-const BALL_COLOR: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-const CENTER_LINE_COLOR: [u8; 4] = [0x40, 0x40, 0x40, 0xFF];
-const SCORE_COLOR_P1: [u8; 4] = [0x44, 0xCC, 0x44, 0xFF];
-const SCORE_COLOR_P2: [u8; 4] = [0x44, 0x44, 0xCC, 0xFF];
-const MSG_COLOR: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+// ─── Neon Arcade palette (BGRA format) ───
+const BG_COLOR: [u8; 4] = [0x12, 0x06, 0x04, 0xFF];       // #040612 deep void
+const BG_FIELD: [u8; 4] = [0x18, 0x0A, 0x06, 0xFF];       // #060A18 slightly lighter field
+const WALL_COLOR: [u8; 4] = [0x44, 0x22, 0x11, 0xFF];      // #112244 dim indigo border
+const WALL_GLOW: [u8; 4] = [0x66, 0x33, 0x18, 0xFF];       // #183366 border glow
+const P1_COLOR: [u8; 4] = [0xEE, 0xFF, 0x00, 0xFF];        // #00FFEE neon cyan
+const P1_GLOW: [u8; 4] = [0x55, 0x66, 0x00, 0xFF];         // #006655 cyan glow
+const P2_COLOR: [u8; 4] = [0x66, 0x00, 0xFF, 0xFF];        // #FF0066 neon magenta/pink
+const P2_GLOW: [u8; 4] = [0x22, 0x00, 0x55, 0xFF];         // #550022 magenta glow
+const BALL_COLOR: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];      // #FFFFFF pure white
+const BALL_GLOW: [u8; 4] = [0x55, 0x55, 0x55, 0xFF];       // #555555 white glow
+const BALL_TRAIL1: [u8; 4] = [0x33, 0x33, 0x33, 0xFF];     // #333333 recent trail
+const BALL_TRAIL2: [u8; 4] = [0x1A, 0x1A, 0x1A, 0xFF];     // #1A1A1A fading trail
+const CENTER_LINE_COLOR: [u8; 4] = [0x28, 0x14, 0x0C, 0xFF]; // #0C1428 subtle center
+const SCORE_COLON: [u8; 4] = [0x40, 0x30, 0x20, 0xFF];     // dim colon dots
 
 // VirtIO keyboard scancodes
 const KEY_W: u8 = 17;
@@ -159,42 +165,78 @@ fn draw_digit(x: i32, y: i32, digit: u32, color: [u8; 4]) {
 
 fn draw_score(score1: u32, score2: u32) {
     let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
-    let sy = PLAY_TOP + 10;
-    fill_rect(cx - 60, sy, 120, DIGIT_H + 4, BG_COLOR);
-    draw_digit(cx - 50, sy, score1, SCORE_COLOR_P1);
-    fill_rect(cx - 4, sy + 8, 8, 4, MSG_COLOR);
-    fill_rect(cx - 4, sy + 18, 8, 4, MSG_COLOR);
-    draw_digit(cx + 30, sy, score2, SCORE_COLOR_P2);
+    let scale = 2;
+    let dw = DIGIT_W * scale; // 40
+    let dh = DIGIT_H * scale; // 60
+    let sy = PLAY_TOP + 15;
+    // Erase score area
+    fill_rect(cx - dw - 30, sy - 2, dw * 2 + 60, dh + 4, BG_FIELD);
+    // P1 score in cyan, left of center
+    draw_big_digit(cx - dw - 20, sy, score1, P1_COLOR, scale);
+    // Colon dots
+    fill_rect(cx - 4, sy + dh / 3, 8, 8, SCORE_COLON);
+    fill_rect(cx - 4, sy + dh * 2 / 3, 8, 8, SCORE_COLON);
+    // P2 score in magenta, right of center
+    draw_big_digit(cx + 20, sy, score2, P2_COLOR, scale);
 }
 
 fn draw_background() {
-    fill_rect(PLAY_LEFT, PLAY_TOP, PLAY_WIDTH, PLAY_HEIGHT, BG_COLOR);
-    fill_rect(PLAY_LEFT, PLAY_TOP, PLAY_WIDTH, 4, WALL_COLOR);
-    fill_rect(PLAY_LEFT, PLAY_BOTTOM - 4, PLAY_WIDTH, 4, WALL_COLOR);
+    // Fill entire play area with deep field color
+    fill_rect(PLAY_LEFT, PLAY_TOP, PLAY_WIDTH, PLAY_HEIGHT, BG_FIELD);
+
+    // Outer glow border (wider, dimmer)
+    fill_rect(PLAY_LEFT - 2, PLAY_TOP - 2, PLAY_WIDTH + 4, 6, WALL_GLOW);
+    fill_rect(PLAY_LEFT - 2, PLAY_BOTTOM - 4, PLAY_WIDTH + 4, 6, WALL_GLOW);
+    fill_rect(PLAY_LEFT - 2, PLAY_TOP - 2, 6, PLAY_HEIGHT + 4, WALL_GLOW);
+    fill_rect(PLAY_RIGHT - 4, PLAY_TOP - 2, 6, PLAY_HEIGHT + 4, WALL_GLOW);
+
+    // Inner bright border
+    fill_rect(PLAY_LEFT, PLAY_TOP, PLAY_WIDTH, 2, WALL_COLOR);
+    fill_rect(PLAY_LEFT, PLAY_BOTTOM - 2, PLAY_WIDTH, 2, WALL_COLOR);
     fill_rect(PLAY_LEFT, PLAY_TOP, 2, PLAY_HEIGHT, WALL_COLOR);
     fill_rect(PLAY_RIGHT - 2, PLAY_TOP, 2, PLAY_HEIGHT, WALL_COLOR);
+
+    // Center dashed line — alternating subtle dots
     let cx = (PLAY_LEFT + PLAY_RIGHT) / 2 - 1;
-    let mut y = PLAY_TOP + 10;
-    while y < PLAY_BOTTOM - 10 {
-        fill_rect(cx, y, 2, 10, CENTER_LINE_COLOR);
-        y += 20;
+    let mut y = PLAY_TOP + 12;
+    while y < PLAY_BOTTOM - 12 {
+        fill_rect(cx, y, 2, 6, CENTER_LINE_COLOR);
+        y += 18;
     }
 }
 
-fn draw_paddle(x: i32, y: i32) {
-    fill_rect(x, y, PADDLE_WIDTH, PADDLE_HEIGHT, PADDLE_COLOR);
+const GLOW_PAD: i32 = 3; // glow extends 3px beyond element
+
+fn draw_paddle(x: i32, y: i32, player: u8) {
+    let (color, glow) = if player == 1 { (P1_COLOR, P1_GLOW) } else { (P2_COLOR, P2_GLOW) };
+    // Glow halo
+    fill_rect(x - GLOW_PAD, y - GLOW_PAD, PADDLE_WIDTH + GLOW_PAD * 2, PADDLE_HEIGHT + GLOW_PAD * 2, glow);
+    // Bright paddle
+    fill_rect(x, y, PADDLE_WIDTH, PADDLE_HEIGHT, color);
 }
 
 fn erase_paddle(x: i32, y: i32) {
-    fill_rect(x, y, PADDLE_WIDTH, PADDLE_HEIGHT, BG_COLOR);
+    fill_rect(x - GLOW_PAD, y - GLOW_PAD, PADDLE_WIDTH + GLOW_PAD * 2, PADDLE_HEIGHT + GLOW_PAD * 2, BG_FIELD);
 }
 
 fn draw_ball(x: i32, y: i32) {
+    // Glow halo
+    fill_rect(x - GLOW_PAD, y - GLOW_PAD, BALL_SIZE + GLOW_PAD * 2, BALL_SIZE + GLOW_PAD * 2, BALL_GLOW);
+    // Bright core
     fill_rect(x, y, BALL_SIZE, BALL_SIZE, BALL_COLOR);
 }
 
-fn erase_ball(x: i32, y: i32) {
-    fill_rect(x, y, BALL_SIZE, BALL_SIZE, BG_COLOR);
+fn draw_ball_trail(x: i32, y: i32, age: u8) {
+    let color = if age == 1 { BALL_TRAIL1 } else { BALL_TRAIL2 };
+    let shrink = age as i32 * 2;
+    let s = BALL_SIZE - shrink;
+    if s > 0 {
+        fill_rect(x + shrink / 2, y + shrink / 2, s, s, color);
+    }
+}
+
+fn erase_ball_area(x: i32, y: i32) {
+    fill_rect(x - GLOW_PAD, y - GLOW_PAD, BALL_SIZE + GLOW_PAD * 2, BALL_SIZE + GLOW_PAD * 2, BG_FIELD);
 }
 
 /// Draw a large 7-segment digit (scaled by `scale` from base 20x30).
@@ -216,56 +258,57 @@ fn draw_big_digit(x: i32, y: i32, digit: u32, color: [u8; 4], scale: i32) {
     if segs & (1 << 6) != 0 { fill_rect(x, y + half - t / 2, w, t, color); }
 }
 
-const BANNER_W: i32 = 300;
-const BANNER_H: i32 = 200;
+const BANNER_W: i32 = 340;
+const BANNER_H: i32 = 220;
 
-/// Draw game over screen: dark overlay with large "P1" or "P2" in winner's color.
+/// Draw game over screen with neon banner.
 fn draw_game_over(winner: u32) {
     let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
     let cy = (PLAY_TOP + PLAY_BOTTOM) / 2;
     let bx = cx - BANNER_W / 2;
     let by = cy - BANNER_H / 2;
 
-    // Dark overlay banner
-    let overlay: [u8; 4] = [0x10, 0x08, 0x08, 0xFF];
-    fill_rect(bx, by, BANNER_W, BANNER_H, overlay);
+    let (color, glow) = if winner == 1 { (P1_COLOR, P1_GLOW) } else { (P2_COLOR, P2_GLOW) };
 
-    // Border in winner's color
-    let color = if winner == 1 { SCORE_COLOR_P1 } else { SCORE_COLOR_P2 };
+    // Outer glow
+    fill_rect(bx - 4, by - 4, BANNER_W + 8, BANNER_H + 8, glow);
+    // Dark overlay banner
+    fill_rect(bx, by, BANNER_W, BANNER_H, BG_COLOR);
+    // Bright border
     fill_rect(bx, by, BANNER_W, 3, color);
     fill_rect(bx, by + BANNER_H - 3, BANNER_W, 3, color);
     fill_rect(bx, by, 3, BANNER_H, color);
     fill_rect(bx + BANNER_W - 3, by, 3, BANNER_H, color);
 
-    // "P" rendered as segments: top + top-left + top-right + middle + bottom-left
-    // (custom shape, not from DIGIT_SEGS)
+    // "P" letter rendered manually
     let scale = 3;
-    let pw = DIGIT_W * scale; // 60
-    let ph = DIGIT_H * scale; // 90
-    let pt = SEG_T * scale;   // 12
+    let pw = DIGIT_W * scale;
+    let ph = DIGIT_H * scale;
+    let pt = SEG_T * scale;
     let phalf = ph / 2;
-    let px = cx - pw - 10;
+    let px = cx - pw - 15;
     let py = cy - phalf;
-    // top bar
-    fill_rect(px, py, pw, pt, color);
-    // top-left
-    fill_rect(px, py, pt, phalf, color);
-    // top-right
-    fill_rect(px + pw - pt, py, pt, phalf, color);
-    // middle bar
-    fill_rect(px, py + phalf - pt / 2, pw, pt, color);
-    // bottom-left
-    fill_rect(px, py + phalf, pt, phalf, color);
+    fill_rect(px, py, pw, pt, color);                       // top
+    fill_rect(px, py, pt, phalf, color);                    // top-left
+    fill_rect(px + pw - pt, py, pt, phalf, color);          // top-right
+    fill_rect(px, py + phalf - pt / 2, pw, pt, color);     // middle
+    fill_rect(px, py + phalf, pt, phalf, color);            // bottom-left
 
     // Winner digit (1 or 2)
-    draw_big_digit(cx + 10, cy - phalf, winner, color, scale);
+    draw_big_digit(cx + 15, cy - phalf, winner, color, scale);
 }
 
 /// Erase the game over banner area.
 fn erase_game_over() {
     let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
     let cy = (PLAY_TOP + PLAY_BOTTOM) / 2;
-    fill_rect(cx - BANNER_W / 2, cy - BANNER_H / 2, BANNER_W, BANNER_H, BG_COLOR);
+    fill_rect(
+        cx - BANNER_W / 2 - 4,
+        cy - BANNER_H / 2 - 4,
+        BANNER_W + 8,
+        BANNER_H + 8,
+        BG_FIELD,
+    );
 }
 
 // ─── PRNG ───
@@ -518,16 +561,23 @@ fn child_loop(state: &mut SharedState) -> ! {
 fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     crate::println!("[pingpong] Press any key on VNC to start!");
     crate::println!("[pingpong] P1: W/S  |  P2: Up/Down arrows");
+    // Fill screen outside play area with deep void
+    fill_rect(0, 0, 1280, 800, BG_COLOR);
     draw_background();
     draw_score(state.score1, state.score2);
-    draw_paddle(PADDLE1_X, state.paddle1_y);
-    draw_paddle(PADDLE2_X, state.paddle2_y);
+    draw_paddle(PADDLE1_X, state.paddle1_y, 1);
+    draw_paddle(PADDLE2_X, state.paddle2_y, 2);
     fb_flush();
 
     let mut keys = KeyState::new();
     let mut game_over_drawn = false;
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
+    // Ball trail: 2 previous positions
+    let mut trail1_x = prev_ball_x;
+    let mut trail1_y = prev_ball_y;
+    let mut trail2_x = prev_ball_x;
+    let mut trail2_y = prev_ball_y;
     let mut prev_paddle1_y = state.paddle1_y;
     let mut prev_paddle2_y = state.paddle2_y;
     let mut prev_score1 = state.score1;
@@ -585,38 +635,64 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                     init_game(state, rng);
                     draw_background();
                     draw_score(0, 0);
+                    draw_paddle(PADDLE1_X, state.paddle1_y, 1);
+                    draw_paddle(PADDLE2_X, state.paddle2_y, 2);
                     fb_flush();
                     prev_score1 = 0;
                     prev_score2 = 0;
+                    prev_paddle1_y = state.paddle1_y;
+                    prev_paddle2_y = state.paddle2_y;
+                    prev_ball_x = state.ball_x / FP_ONE;
+                    prev_ball_y = state.ball_y / FP_ONE;
+                    trail1_x = prev_ball_x;
+                    trail1_y = prev_ball_y;
+                    trail2_x = prev_ball_x;
+                    trail2_y = prev_ball_y;
                 }
             }
             _ => {}
         }
 
         // ─── Rendering ───
-        // Always redraw paddles to fix overlap artifacts with ball
         let ball_x = state.ball_x / FP_ONE;
         let ball_y = state.ball_y / FP_ONE;
-        if ball_x != prev_ball_x || ball_y != prev_ball_y {
-            erase_ball(prev_ball_x, prev_ball_y);
+        let ball_moved = ball_x != prev_ball_x || ball_y != prev_ball_y;
+
+        if ball_moved {
+            // Erase oldest trail
+            erase_ball_area(trail2_x, trail2_y);
+            // Erase previous trail (now becomes trail2)
+            erase_ball_area(trail1_x, trail1_y);
+            // Erase current ball position
+            erase_ball_area(prev_ball_x, prev_ball_y);
+
+            // Shift trail history
+            trail2_x = trail1_x;
+            trail2_y = trail1_y;
+            trail1_x = prev_ball_x;
+            trail1_y = prev_ball_y;
             prev_ball_x = ball_x;
             prev_ball_y = ball_y;
         }
 
-        // Redraw paddles if they moved (erase old, draw new)
+        // Redraw paddles if moved
         if state.paddle1_y != prev_paddle1_y {
             erase_paddle(PADDLE1_X, prev_paddle1_y);
             prev_paddle1_y = state.paddle1_y;
         }
-        draw_paddle(PADDLE1_X, state.paddle1_y);
+        draw_paddle(PADDLE1_X, state.paddle1_y, 1);
 
         if state.paddle2_y != prev_paddle2_y {
             erase_paddle(PADDLE2_X, prev_paddle2_y);
             prev_paddle2_y = state.paddle2_y;
         }
-        draw_paddle(PADDLE2_X, state.paddle2_y);
+        draw_paddle(PADDLE2_X, state.paddle2_y, 2);
 
-        // Draw ball on top of everything
+        // Draw ball trail + ball on top
+        if ball_moved {
+            draw_ball_trail(trail2_x, trail2_y, 2);
+            draw_ball_trail(trail1_x, trail1_y, 1);
+        }
         draw_ball(ball_x, ball_y);
 
         if state.score1 != prev_score1 || state.score2 != prev_score2 {
