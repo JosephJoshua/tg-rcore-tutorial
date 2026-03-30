@@ -57,6 +57,9 @@ mod virtio_block;
 /// DMA bump allocator for virtio-drivers v0.3.0
 #[cfg(target_arch = "riscv64")]
 mod allocator;
+/// VirtIO GPU and keyboard driver module
+#[cfg(target_arch = "riscv64")]
+mod virtio;
 
 #[macro_use]
 extern crate tg_console;
