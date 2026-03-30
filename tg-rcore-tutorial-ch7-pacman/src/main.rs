@@ -333,6 +333,8 @@ extern "C" fn rust_main() -> ! {
                 // ─── 其他异常/中断：杀死进程 ───
                 e => {
                     log::error!("unsupported trap: {e:?}");
+                    log::error!("  stval = {:#x}", stval::read());
+                    log::error!("  sepc  = {:#x}", task.context.context.pc());
                     unsafe { (*processor).make_current_exited(-3) };
                 }
             }

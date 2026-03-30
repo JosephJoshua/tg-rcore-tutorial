@@ -35,8 +35,8 @@ const HUD_Y: usize = MAZE_PX_Y;
 const CHAR_SIZE: usize = 20;
 const CHAR_PAD: usize = (CELL_SIZE - CHAR_SIZE) / 2;
 
-// Tile buffer for fill_rect (16x16 = 1024 bytes max)
-const TILE_SIZE: usize = 16;
+// Tile buffer for fill_rect (8x8 = 256 bytes max — keep small to avoid stack overflow)
+const TILE_SIZE: usize = 8;
 
 // Timing (ticks at ~8 Hz game logic)
 const FRAME_MS: usize = 125; // 8 ticks per second
@@ -318,31 +318,33 @@ fn fill_rect(x: usize, y: usize, w: usize, h: usize, color: [u8; 4]) {
 }
 
 /// Draw a single glyph character at pixel position.
+/// Renders row-by-row (40-byte row buffer) to avoid a 560-byte sprite buffer.
 fn draw_char(x: usize, y: usize, ch: u8, color: [u8; 4]) {
     let glyph = match GLYPHS.iter().find(|(c, _)| *c == ch.to_ascii_uppercase()) {
         Some((_, rows)) => rows,
         None => return,
     };
-    let pw = GLYPH_W * FONT_SCALE;
-    let ph = GLYPH_H * FONT_SCALE;
-    // Buffer for one character: 10x14 = 140 pixels * 4 = 560 bytes
-    let mut buf = [0u8; 10 * 14 * 4];
+    let pw = GLYPH_W * FONT_SCALE; // 10
     for gr in 0..GLYPH_H {
-        for gc in 0..GLYPH_W {
-            if (glyph[gr] >> (GLYPH_W - 1 - gc)) & 1 == 1 {
-                for sr in 0..FONT_SCALE {
-                    for sc in 0..FONT_SCALE {
-                        let idx = ((gr * FONT_SCALE + sr) * pw + gc * FONT_SCALE + sc) * 4;
-                        buf[idx] = color[0];
-                        buf[idx + 1] = color[1];
-                        buf[idx + 2] = color[2];
-                        buf[idx + 3] = color[3];
+        for sr in 0..FONT_SCALE {
+            // One row: pw pixels * 4 bytes = 40 bytes
+            let mut row_buf = [0u8; 10 * 4];
+            for gc in 0..GLYPH_W {
+                let on = (glyph[gr] >> (GLYPH_W - 1 - gc)) & 1 == 1;
+                for sc in 0..FONT_SCALE {
+                    let idx = (gc * FONT_SCALE + sc) * 4;
+                    if on {
+                        row_buf[idx] = color[0];
+                        row_buf[idx + 1] = color[1];
+                        row_buf[idx + 2] = color[2];
+                        row_buf[idx + 3] = color[3];
                     }
+                    // else leave as [0,0,0,0] (transparent/black)
                 }
             }
+            fb_write_row(x, y + gr * FONT_SCALE + sr, pw, &row_buf[..pw * 4]);
         }
     }
-    fb_write(x as u32, y as u32, pw as u32, ph as u32, buf.as_ptr());
 }
 
 fn draw_string(x: usize, y: usize, s: &[u8], color: [u8; 4]) {
@@ -554,29 +556,30 @@ fn erase_cell(gx: u8, gy: u8) {
     fill_rect(px, py, CELL_SIZE, CELL_SIZE, PATH_COLOR);
 }
 
+/// Write a single row of pixels using a small stack buffer, processing one
+/// row at a time to avoid large sprite buffers.  The row buffer is
+/// CHAR_SIZE * 4 = 80 bytes — trivial on the stack.
+fn fb_write_row(x: usize, y: usize, w: usize, row_buf: &[u8]) {
+    fb_write(x as u32, y as u32, w as u32, 1, row_buf.as_ptr());
+}
+
 /// Draw Pac-Man as a filled circle with rounded corners, a directional mouth,
 /// and a brighter highlight in the center.
+/// Renders row-by-row to avoid a 1600-byte sprite buffer on the stack.
 fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
     let (px, py) = cell_px(gx, gy);
-    let cs = CHAR_SIZE;
+    let cs = CHAR_SIZE; // 20
     let half = cs / 2;
     let r = half as i32;
     let r2 = r * r;
 
-    // 20x20 pixel buffer = 1600 bytes
-    let mut buf = [0u8; 20 * 20 * 4];
-    // Fill with path color first (transparent background)
-    for i in 0..(cs * cs) {
-        buf[i * 4] = PATH_COLOR[0];
-        buf[i * 4 + 1] = PATH_COLOR[1];
-        buf[i * 4 + 2] = PATH_COLOR[2];
-        buf[i * 4 + 3] = PATH_COLOR[3];
-    }
-
     for row in 0..cs {
+        // One-row buffer: 20 pixels * 4 bytes = 80 bytes
+        let mut row_buf = [0u8; 20 * 4];
         for col in 0..cs {
             let dy = row as i32 - r;
             let dx = col as i32 - r;
+            let idx = col * 4;
 
             // Rounded corner check: skip 2x2 blocks at the four corners
             let in_corner = (row < 2 && col < 2)
@@ -584,12 +587,10 @@ fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
                 || (row >= cs - 2 && col < 2)
                 || (row >= cs - 2 && col >= cs - 2);
 
-            if in_corner {
-                continue; // leave as PATH_COLOR
-            }
-
-            if dx * dx + dy * dy <= r2 {
-                // Check if in mouth wedge (4 pixels deep)
+            let color = if in_corner || dx * dx + dy * dy > r2 {
+                PATH_COLOR
+            } else {
+                // Check if in mouth wedge
                 let in_mouth = if mouth_open {
                     match dir {
                         DIR_RIGHT => dx > 0 && dx <= 4 + r && dy.unsigned_abs() as i32 * 3 < dx * 2,
@@ -601,30 +602,20 @@ fn draw_pacman(gx: u8, gy: u8, dir: u8, mouth_open: bool) {
                 } else {
                     false
                 };
-                let idx = (row * cs + col) * 4;
                 if in_mouth {
-                    buf[idx] = PAC_MOUTH[0];
-                    buf[idx + 1] = PAC_MOUTH[1];
-                    buf[idx + 2] = PAC_MOUTH[2];
-                    buf[idx + 3] = PAC_MOUTH[3];
+                    PAC_MOUTH
                 } else {
-                    // Highlight center 10x10 area
                     let in_highlight = dx.unsigned_abs() <= 5 && dy.unsigned_abs() <= 5;
-                    let color = if in_highlight {
-                        PAC_HIGHLIGHT
-                    } else {
-                        PAC_BODY
-                    };
-                    buf[idx] = color[0];
-                    buf[idx + 1] = color[1];
-                    buf[idx + 2] = color[2];
-                    buf[idx + 3] = color[3];
+                    if in_highlight { PAC_HIGHLIGHT } else { PAC_BODY }
                 }
-            }
+            };
+            row_buf[idx] = color[0];
+            row_buf[idx + 1] = color[1];
+            row_buf[idx + 2] = color[2];
+            row_buf[idx + 3] = color[3];
         }
+        fb_write_row(px, py + row, cs, &row_buf[..cs * 4]);
     }
-
-    fb_write(px as u32, py as u32, cs as u32, cs as u32, buf.as_ptr());
 }
 
 /// Blend a highlight into a base color (simple additive lightening).
@@ -645,179 +636,132 @@ fn darken_color(base: [u8; 4], amount: u8) -> [u8; 4] {
 
 /// Draw a ghost sprite with dome top, directional eyes, wavy skirt,
 /// and special rendering for frightened/eaten states.
+/// Renders row-by-row to avoid a 1600-byte sprite buffer on the stack.
 fn draw_ghost(gx: u8, gy: u8, ghost_idx: usize, dir: u8, frightened: bool, eaten: bool) {
-    let cs = CHAR_SIZE;
+    let cs = CHAR_SIZE; // 20
     let half = cs / 2;
 
-    // 20x20 pixel buffer = 1600 bytes
-    let mut buf = [0u8; 20 * 20 * 4];
-    // Fill with path color (background)
-    for i in 0..(cs * cs) {
-        buf[i * 4] = PATH_COLOR[0];
-        buf[i * 4 + 1] = PATH_COLOR[1];
-        buf[i * 4 + 2] = PATH_COLOR[2];
-        buf[i * 4 + 3] = PATH_COLOR[3];
-    }
+    let body_color = if frightened {
+        FRIGHT_BODY
+    } else {
+        GHOST_COLORS[ghost_idx]
+    };
+    let highlight_color = lighten_color(body_color, 40);
+    let dark_color = darken_color(body_color, 50);
 
-    if !eaten {
-        let body_color = if frightened {
-            FRIGHT_BODY
-        } else {
-            GHOST_COLORS[ghost_idx]
-        };
-        let highlight_color = lighten_color(body_color, 40);
-        let dark_color = darken_color(body_color, 50);
-
-        // Draw dome-topped body with wavy skirt bottom
-        for row in 0..cs {
-            for col in 0..cs {
-                let draw = if row < half {
-                    // Top half: circular dome with rounded corners
-                    let dy = row as i32 - half as i32;
-                    let dx = col as i32 - half as i32;
-                    let r = half as i32;
-                    dx * dx + dy * dy <= r * r
-                } else if row >= cs - 3 {
-                    // Bottom 3 rows: wavy skirt with 5 bumps
-                    // Each bump is ~4 pixels wide across 20 pixels
-                    let bump_idx = col / 4; // 0..4 (5 bumps)
-                    let in_bump = bump_idx % 2 == 0;
-                    if row == cs - 1 {
-                        // Bottom row: only the bump peaks
-                        in_bump && col >= 1 && col < cs - 1
-                    } else if row == cs - 2 {
-                        // Second-to-last: slightly wider
-                        col >= 1 && col < cs - 1
-                    } else {
-                        // Third-to-last: full width
-                        col >= 1 && col < cs - 1
-                    }
-                } else {
-                    // Middle: full-width rectangular body
-                    col >= 1 && col < cs - 1
-                };
-
-                if draw {
-                    let idx = (row * cs + col) * 4;
-                    // Lighter highlight on top third of body
-                    let color = if row < half / 2 {
-                        highlight_color
-                    } else if row >= cs - 3 && (col / 4) % 2 != 0 && row >= cs - 2 {
-                        dark_color // dark alternating bumps in skirt
-                    } else {
-                        body_color
-                    };
-                    buf[idx] = color[0];
-                    buf[idx + 1] = color[1];
-                    buf[idx + 2] = color[2];
-                    buf[idx + 3] = color[3];
-                }
-            }
-        }
-    }
-
-    // Eyes: 6x4 whites with 3x2 directional pupils
+    // Eye geometry
     let eye_y = 6usize;
     let eye_left_x = 3usize;
     let eye_right_x = 11usize;
     let eye_w = 6usize;
     let eye_h = 4usize;
 
-    if frightened && !eaten {
-        // Frightened ghost: small white dot eyes
-        let dot_positions: [(usize, usize); 4] = [
-            (eye_y + 1, eye_left_x + 2),
-            (eye_y + 1, eye_left_x + 3),
-            (eye_y + 1, eye_right_x + 2),
-            (eye_y + 1, eye_right_x + 3),
-        ];
-        for (dy, dx) in dot_positions {
-            let idx = (dy * cs + dx) * 4;
-            if idx + 3 < buf.len() {
-                buf[idx] = FRIGHT_EYE[0];
-                buf[idx + 1] = FRIGHT_EYE[1];
-                buf[idx + 2] = FRIGHT_EYE[2];
-                buf[idx + 3] = FRIGHT_EYE[3];
-            }
-        }
-
-        // Frightened mouth: white zigzag dots
-        let mouth_y = 14usize;
-        for mx in 3..17 {
-            let my_off: usize = match mx % 4 {
-                0 => 0,
-                1 => 1,
-                2 => 0,
-                _ => 1,
-            };
-            let idx = ((mouth_y + my_off) * cs + mx) * 4;
-            if idx + 3 < buf.len() {
-                buf[idx] = FRIGHT_EYE[0];
-                buf[idx + 1] = FRIGHT_EYE[1];
-                buf[idx + 2] = FRIGHT_EYE[2];
-                buf[idx + 3] = FRIGHT_EYE[3];
-            }
-        }
-    } else {
-        // Normal or eaten: draw proper eye whites and directional pupils
-        // Draw eye whites (6x4)
-        for ey in 0..eye_h {
-            for ex in 0..eye_w {
-                let li = ((eye_y + ey) * cs + eye_left_x + ex) * 4;
-                let ri = ((eye_y + ey) * cs + eye_right_x + ex) * 4;
-                if li + 3 < buf.len() {
-                    buf[li] = GHOST_EYE_WHITE[0];
-                    buf[li + 1] = GHOST_EYE_WHITE[1];
-                    buf[li + 2] = GHOST_EYE_WHITE[2];
-                    buf[li + 3] = GHOST_EYE_WHITE[3];
-                }
-                if ri + 3 < buf.len() {
-                    buf[ri] = GHOST_EYE_WHITE[0];
-                    buf[ri + 1] = GHOST_EYE_WHITE[1];
-                    buf[ri + 2] = GHOST_EYE_WHITE[2];
-                    buf[ri + 3] = GHOST_EYE_WHITE[3];
-                }
-            }
-        }
-
-        // Draw pupils (3x2) offset by direction
-        let (pdx, pdy): (i32, i32) = match dir {
-            DIR_UP => (0, -1),
-            DIR_DOWN => (0, 1),
-            DIR_LEFT => (-1, 0),
-            DIR_RIGHT => (1, 0),
-            _ => (0, 0),
-        };
-        // Pupil center within eye white area
-        let pupil_cx = 3i32 + pdx;
-        let pupil_cy = 1i32 + pdy;
-        for py2 in 0..2i32 {
-            for px2 in 0..3i32 {
-                let ry = pupil_cy + py2;
-                let rx = pupil_cx - 1 + px2;
-                if ry >= 0 && ry < eye_h as i32 && rx >= 0 && rx < eye_w as i32 {
-                    let li = ((eye_y + ry as usize) * cs + eye_left_x + rx as usize) * 4;
-                    let ri = ((eye_y + ry as usize) * cs + eye_right_x + rx as usize) * 4;
-                    if li + 3 < buf.len() {
-                        buf[li] = GHOST_EYE_PUPIL[0];
-                        buf[li + 1] = GHOST_EYE_PUPIL[1];
-                        buf[li + 2] = GHOST_EYE_PUPIL[2];
-                        buf[li + 3] = GHOST_EYE_PUPIL[3];
-                    }
-                    if ri + 3 < buf.len() {
-                        buf[ri] = GHOST_EYE_PUPIL[0];
-                        buf[ri + 1] = GHOST_EYE_PUPIL[1];
-                        buf[ri + 2] = GHOST_EYE_PUPIL[2];
-                        buf[ri + 3] = GHOST_EYE_PUPIL[3];
-                    }
-                }
-            }
-        }
-    }
+    // Pupil offset by direction
+    let (pdx, pdy): (i32, i32) = match dir {
+        DIR_UP => (0, -1),
+        DIR_DOWN => (0, 1),
+        DIR_LEFT => (-1, 0),
+        DIR_RIGHT => (1, 0),
+        _ => (0, 0),
+    };
+    let pupil_cx = 3i32 + pdx;
+    let pupil_cy = 1i32 + pdy;
 
     let cpx = MAZE_PX_X + gx as usize * CELL_SIZE + CHAR_PAD;
     let cpy = MAZE_PX_Y + gy as usize * CELL_SIZE + CHAR_PAD;
-    fb_write(cpx as u32, cpy as u32, cs as u32, cs as u32, buf.as_ptr());
+
+    for row in 0..cs {
+        // One-row buffer: 20 pixels * 4 bytes = 80 bytes
+        let mut row_buf = [0u8; 20 * 4];
+
+        for col in 0..cs {
+            let idx = col * 4;
+            let mut color = PATH_COLOR;
+
+            // --- Body ---
+            if !eaten {
+                let draw = if row < half {
+                    let dy = row as i32 - half as i32;
+                    let dx = col as i32 - half as i32;
+                    let r = half as i32;
+                    dx * dx + dy * dy <= r * r
+                } else if row >= cs - 3 {
+                    let bump_idx = col / 4;
+                    let in_bump = bump_idx % 2 == 0;
+                    if row == cs - 1 {
+                        in_bump && col >= 1 && col < cs - 1
+                    } else if row == cs - 2 {
+                        col >= 1 && col < cs - 1
+                    } else {
+                        col >= 1 && col < cs - 1
+                    }
+                } else {
+                    col >= 1 && col < cs - 1
+                };
+
+                if draw {
+                    color = if row < half / 2 {
+                        highlight_color
+                    } else if row >= cs - 3 && (col / 4) % 2 != 0 && row >= cs - 2 {
+                        dark_color
+                    } else {
+                        body_color
+                    };
+                }
+            }
+
+            // --- Eyes / face overlay ---
+            if frightened && !eaten {
+                // Frightened eyes: 2x1 white dots
+                if row == eye_y + 1
+                    && ((col == eye_left_x + 2)
+                        || (col == eye_left_x + 3)
+                        || (col == eye_right_x + 2)
+                        || (col == eye_right_x + 3))
+                {
+                    color = FRIGHT_EYE;
+                }
+                // Frightened mouth zigzag
+                if col >= 3 && col < 17 {
+                    let mouth_y = 14usize;
+                    let my_off: usize = if col % 4 == 1 || col % 4 == 3 { 1 } else { 0 };
+                    if row == mouth_y + my_off {
+                        color = FRIGHT_EYE;
+                    }
+                }
+            } else {
+                // Normal or eaten: eye whites
+                if row >= eye_y && row < eye_y + eye_h {
+                    let ey = row - eye_y;
+                    if col >= eye_left_x && col < eye_left_x + eye_w {
+                        color = GHOST_EYE_WHITE;
+                    }
+                    if col >= eye_right_x && col < eye_right_x + eye_w {
+                        color = GHOST_EYE_WHITE;
+                    }
+                    // Pupils
+                    let ex_in_left = col as i32 - eye_left_x as i32;
+                    let ex_in_right = col as i32 - eye_right_x as i32;
+                    let ey_i = ey as i32;
+                    for ex_in in [ex_in_left, ex_in_right] {
+                        let rx = ex_in - (pupil_cx - 1);
+                        let ry = ey_i - pupil_cy;
+                        if rx >= 0 && rx < 3 && ry >= 0 && ry < 2 {
+                            if ex_in >= 0 && ex_in < eye_w as i32 {
+                                color = GHOST_EYE_PUPIL;
+                            }
+                        }
+                    }
+                }
+            }
+
+            row_buf[idx] = color[0];
+            row_buf[idx + 1] = color[1];
+            row_buf[idx + 2] = color[2];
+            row_buf[idx + 3] = color[3];
+        }
+        fb_write_row(cpx, cpy + row, cs, &row_buf[..cs * 4]);
+    }
 }
 
 // ============================================================
@@ -859,36 +803,31 @@ fn draw_hud_static() {
 }
 
 /// Draw a small 8x8 Pac-Man icon for life display at given position.
+/// Renders row-by-row (32-byte row buffer) to avoid a 256-byte sprite buffer.
 fn draw_life_icon(x: usize, y: usize) {
     let sz: usize = 8;
     let half = sz / 2;
     let r = half as i32;
     let r2 = r * r;
-    let mut buf = [0u8; 8 * 8 * 4];
-    for i in 0..(sz * sz) {
-        buf[i * 4] = HUD_BG[0];
-        buf[i * 4 + 1] = HUD_BG[1];
-        buf[i * 4 + 2] = HUD_BG[2];
-        buf[i * 4 + 3] = HUD_BG[3];
-    }
     for row in 0..sz {
+        let mut row_buf = [0u8; 8 * 4];
         for col in 0..sz {
             let dy = row as i32 - r;
             let dx = col as i32 - r;
-            if dx * dx + dy * dy <= r2 {
-                // Small mouth facing right
+            let color = if dx * dx + dy * dy <= r2 {
                 let in_mouth = dx > 0 && dy.unsigned_abs() as i32 * 2 < dx;
-                if !in_mouth {
-                    let idx = (row * sz + col) * 4;
-                    buf[idx] = PAC_BODY[0];
-                    buf[idx + 1] = PAC_BODY[1];
-                    buf[idx + 2] = PAC_BODY[2];
-                    buf[idx + 3] = PAC_BODY[3];
-                }
-            }
+                if in_mouth { HUD_BG } else { PAC_BODY }
+            } else {
+                HUD_BG
+            };
+            let idx = col * 4;
+            row_buf[idx] = color[0];
+            row_buf[idx + 1] = color[1];
+            row_buf[idx + 2] = color[2];
+            row_buf[idx + 3] = color[3];
         }
+        fb_write_row(x, y + row, sz, &row_buf[..sz * 4]);
     }
-    fb_write(x as u32, y as u32, sz as u32, sz as u32, buf.as_ptr());
 }
 
 fn draw_hud_values(score: u32, high_score: u32, lives: u32, level: u32) {
@@ -1230,85 +1169,6 @@ struct Game {
 }
 
 impl Game {
-    fn new() -> Self {
-        Game {
-            maze: INITIAL_MAZE,
-            pac_x: PAC_START_X,
-            pac_y: PAC_START_Y,
-            pac_dir: DIR_LEFT,
-            pac_next_dir: DIR_LEFT,
-            ghosts: [
-                GhostInfo {
-                    x: GHOST_START[0][1],
-                    y: GHOST_START[0][0],
-                    dir: DIR_LEFT,
-                    pid: 0,
-                    write_fd: 0,
-                    read_fd: 0,
-                    frightened_ticks: 0,
-                    eaten: false,
-                    prev_x: GHOST_START[0][1],
-                    prev_y: GHOST_START[0][0],
-                },
-                GhostInfo {
-                    x: GHOST_START[1][1],
-                    y: GHOST_START[1][0],
-                    dir: DIR_UP,
-                    pid: 0,
-                    write_fd: 0,
-                    read_fd: 0,
-                    frightened_ticks: 0,
-                    eaten: false,
-                    prev_x: GHOST_START[1][1],
-                    prev_y: GHOST_START[1][0],
-                },
-                GhostInfo {
-                    x: GHOST_START[2][1],
-                    y: GHOST_START[2][0],
-                    dir: DIR_UP,
-                    pid: 0,
-                    write_fd: 0,
-                    read_fd: 0,
-                    frightened_ticks: 0,
-                    eaten: false,
-                    prev_x: GHOST_START[2][1],
-                    prev_y: GHOST_START[2][0],
-                },
-                GhostInfo {
-                    x: GHOST_START[3][1],
-                    y: GHOST_START[3][0],
-                    dir: DIR_UP,
-                    pid: 0,
-                    write_fd: 0,
-                    read_fd: 0,
-                    frightened_ticks: 0,
-                    eaten: false,
-                    prev_x: GHOST_START[3][1],
-                    prev_y: GHOST_START[3][0],
-                },
-            ],
-            state: GameState::Ready,
-            state_timer: 0,
-            score: 0,
-            high_score: 0,
-            lives: INIT_LIVES,
-            level: 1,
-            dots_eaten: 0,
-            total_dots: total_dots(),
-            mouth_open: true,
-            mouth_timer: 0,
-            ghosts_eaten_combo: 0,
-            prev_pac_x: PAC_START_X,
-            prev_pac_y: PAC_START_Y,
-            pellet_blink: true,
-            pellet_blink_timer: 0,
-            prev_score: u32::MAX,
-            prev_lives: u32::MAX,
-            prev_level: u32::MAX,
-            prev_high_score: u32::MAX,
-        }
-    }
-
     fn reset_positions(&mut self) {
         self.pac_x = PAC_START_X;
         self.pac_y = PAC_START_Y;
@@ -1335,6 +1195,46 @@ impl Game {
         self.dots_eaten = 0;
         self.total_dots = total_dots();
         self.reset_positions();
+    }
+
+    /// Reset entire game state in-place (avoids creating a new Game on the stack).
+    fn reset(&mut self) {
+        self.maze = INITIAL_MAZE;
+        self.pac_x = PAC_START_X;
+        self.pac_y = PAC_START_Y;
+        self.pac_dir = DIR_LEFT;
+        self.pac_next_dir = DIR_LEFT;
+        for i in 0..4 {
+            self.ghosts[i].x = GHOST_START[i][1];
+            self.ghosts[i].y = GHOST_START[i][0];
+            self.ghosts[i].dir = if i == 0 { DIR_LEFT } else { DIR_UP };
+            self.ghosts[i].pid = 0;
+            self.ghosts[i].write_fd = 0;
+            self.ghosts[i].read_fd = 0;
+            self.ghosts[i].frightened_ticks = 0;
+            self.ghosts[i].eaten = false;
+            self.ghosts[i].prev_x = GHOST_START[i][1];
+            self.ghosts[i].prev_y = GHOST_START[i][0];
+        }
+        self.state = GameState::Ready;
+        self.state_timer = 0;
+        self.score = 0;
+        // high_score intentionally preserved
+        self.lives = INIT_LIVES;
+        self.level = 1;
+        self.dots_eaten = 0;
+        self.total_dots = total_dots();
+        self.mouth_open = true;
+        self.mouth_timer = 0;
+        self.ghosts_eaten_combo = 0;
+        self.prev_pac_x = PAC_START_X;
+        self.prev_pac_y = PAC_START_Y;
+        self.pellet_blink = true;
+        self.pellet_blink_timer = 0;
+        self.prev_score = u32::MAX;
+        self.prev_lives = u32::MAX;
+        self.prev_level = u32::MAX;
+        self.prev_high_score = u32::MAX;
     }
 }
 
@@ -1436,24 +1336,108 @@ fn keycode_to_dir(key: u8) -> u8 {
 // Main game entry point
 // ============================================================
 
+// Static game instance — avoids putting ~700 bytes of Game on the 8 KiB stack.
+static mut GAME: Game = Game {
+    maze: INITIAL_MAZE,
+    pac_x: PAC_START_X,
+    pac_y: PAC_START_Y,
+    pac_dir: DIR_LEFT,
+    pac_next_dir: DIR_LEFT,
+    ghosts: [
+        GhostInfo {
+            x: GHOST_START[0][1],
+            y: GHOST_START[0][0],
+            dir: DIR_LEFT,
+            pid: 0,
+            write_fd: 0,
+            read_fd: 0,
+            frightened_ticks: 0,
+            eaten: false,
+            prev_x: GHOST_START[0][1],
+            prev_y: GHOST_START[0][0],
+        },
+        GhostInfo {
+            x: GHOST_START[1][1],
+            y: GHOST_START[1][0],
+            dir: DIR_UP,
+            pid: 0,
+            write_fd: 0,
+            read_fd: 0,
+            frightened_ticks: 0,
+            eaten: false,
+            prev_x: GHOST_START[1][1],
+            prev_y: GHOST_START[1][0],
+        },
+        GhostInfo {
+            x: GHOST_START[2][1],
+            y: GHOST_START[2][0],
+            dir: DIR_UP,
+            pid: 0,
+            write_fd: 0,
+            read_fd: 0,
+            frightened_ticks: 0,
+            eaten: false,
+            prev_x: GHOST_START[2][1],
+            prev_y: GHOST_START[2][0],
+        },
+        GhostInfo {
+            x: GHOST_START[3][1],
+            y: GHOST_START[3][0],
+            dir: DIR_UP,
+            pid: 0,
+            write_fd: 0,
+            read_fd: 0,
+            frightened_ticks: 0,
+            eaten: false,
+            prev_x: GHOST_START[3][1],
+            prev_y: GHOST_START[3][0],
+        },
+    ],
+    state: GameState::Ready,
+    state_timer: 0,
+    score: 0,
+    high_score: 0,
+    lives: INIT_LIVES,
+    level: 1,
+    dots_eaten: 0,
+    total_dots: 0, // set at runtime via reset()
+    mouth_open: true,
+    mouth_timer: 0,
+    ghosts_eaten_combo: 0,
+    prev_pac_x: PAC_START_X,
+    prev_pac_y: PAC_START_Y,
+    pellet_blink: true,
+    pellet_blink_timer: 0,
+    prev_score: u32::MAX,
+    prev_lives: u32::MAX,
+    prev_level: u32::MAX,
+    prev_high_score: u32::MAX,
+};
+
 /// Entry point for the Pac-Man game.
 pub fn run_game() {
     crate::println!("Pac-Man starting...");
 
     // Seed RNG
+    crate::println!("[pacman] seeding rng");
     seed_rng(get_time() as u32);
 
     // Get framebuffer info
+    crate::println!("[pacman] fb_info");
     let (_fb_w, _fb_h) = fb_info();
 
     // Load high score
+    crate::println!("[pacman] load_high_score");
     let high_score = load_high_score();
 
-    // Initialize game state
-    let mut game = Game::new();
+    // Initialize game state (use static to keep ~700 bytes off the stack)
+    crate::println!("[pacman] Game::reset");
+    let game = unsafe { &mut *(&raw mut GAME) };
+    game.reset();
     game.high_score = high_score;
 
     // Clear screen
+    crate::println!("[pacman] fill_rect clear screen");
     fill_rect(0, 0, FB_W, FB_H, BG_VOID);
 
     // Draw initial maze
@@ -1464,7 +1448,7 @@ pub fn run_game() {
     draw_hud_values(game.score, game.high_score, game.lives, game.level);
 
     // Spawn ghost processes
-    spawn_ghosts(&mut game);
+    spawn_ghosts(game);
 
     // Draw "READY!" text
     let ready_x = MAZE_PX_X + (MAZE_W * CELL_SIZE - 6 * CHAR_PX_W) / 2;
@@ -1535,14 +1519,14 @@ pub fn run_game() {
                             }
                         }
                     } else if game.state == GameState::GameOver {
-                        // Restart game
-                        game = Game::new();
+                        // Restart game (reset in-place to avoid stack allocation)
+                        game.reset();
                         game.high_score = load_high_score();
                         game.state = GameState::Ready;
                         game.state_timer = 0;
                         // Respawn ghosts
-                        kill_ghosts(&mut game);
-                        spawn_ghosts(&mut game);
+                        kill_ghosts(game);
+                        spawn_ghosts(game);
                         // Redraw everything
                         fill_rect(0, 0, FB_W, FB_H, BG_VOID);
                         draw_maze(&game.maze);
@@ -1924,7 +1908,7 @@ pub fn run_game() {
     }
 
     // Cleanup
-    kill_ghosts(&mut game);
+    kill_ghosts(game);
 
     // Save high score on exit
     if game.score > load_high_score() {
