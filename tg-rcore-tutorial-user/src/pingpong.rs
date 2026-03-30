@@ -572,7 +572,8 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     let mut keys = KeyState::new();
     let mut game_over_drawn = false;
     let mut point_scored_drawn = false;
-    let mut pause_timer: u32 = 0;
+    let mut pause_end_ms: isize = 0;
+    let mut last_flash_ms: isize = 0;
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
     // Ball trail: 2 previous positions
@@ -616,23 +617,24 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 update_physics(state, rng);
             }
             STATE_POINT_SCORED => {
+                let now = crate::get_time();
                 if !point_scored_drawn {
-                    // Flash the updated score
                     draw_score(state.score1, state.score2);
                     prev_score1 = state.score1;
                     prev_score2 = state.score2;
-                    // Erase ball from field
                     erase_ball_area(prev_ball_x, prev_ball_y);
                     erase_ball_area(trail1_x, trail1_y);
                     erase_ball_area(trail2_x, trail2_y);
                     fb_flush();
                     point_scored_drawn = true;
-                    pause_timer = 80; // ~80 scheduler ticks pause
+                    pause_end_ms = now + 3000; // 3 second pause
+                    last_flash_ms = now;
                 }
-                if pause_timer > 0 {
-                    pause_timer -= 1;
-                    // Flash score: alternate between bright and dim every 10 ticks
-                    if pause_timer % 20 == 10 {
+                if now < pause_end_ms {
+                    // Flash score every 400ms
+                    if now - last_flash_ms >= 400 {
+                        last_flash_ms = now;
+                        // Toggle: erase score area
                         let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
                         let scale = 2;
                         let dw = DIGIT_W * scale;
@@ -640,14 +642,16 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                         let sy = PLAY_TOP + 15;
                         fill_rect(cx - dw - 30, sy - 2, dw * 2 + 60, dh + 4, BG_FIELD);
                         fb_flush();
-                    } else if pause_timer % 20 == 0 {
+                    } else if now - last_flash_ms >= 200 {
+                        // Show score (second half of flash cycle)
                         draw_score(state.score1, state.score2);
                         fb_flush();
                     }
                 } else {
                     point_scored_drawn = false;
                     state.game_state = STATE_PLAYING;
-                    // Reset trail to ball center
+                    draw_score(state.score1, state.score2);
+                    fb_flush();
                     prev_ball_x = state.ball_x / FP_ONE;
                     prev_ball_y = state.ball_y / FP_ONE;
                     trail1_x = prev_ball_x;
