@@ -130,8 +130,8 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
 
     cmd.args(["--features", "pacman"]);
 
-    // Make initproc exec "pacman" instead of "user_shell"
-    if name == "initproc" {
+    // Make initproc exec "pacman" unless CHAPTER is already set (e.g., by test.sh)
+    if name == "initproc" && env::var("CHAPTER").is_err() {
         cmd.env("CHAPTER", "pacman");
     }
 

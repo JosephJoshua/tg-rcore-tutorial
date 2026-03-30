@@ -666,6 +666,9 @@ mod impls {
             let current = PROCESSOR.get_mut().current().unwrap();
             if let Some(ptr) = current.address_space.translate(VAddr::new(buf), WRITEABLE) {
                 if fd == STDIN {
+                    // Non-blocking VirtIO keyboard poll.
+                    // Returns 1 byte (keycode or keycode|0x80 for release), or 0 if no event.
+                    // The game polls in a loop; the shell doesn't run (initproc execs pacman).
                     #[cfg(target_arch = "riscv64")]
                     {
                         match crate::keyboard_trygetchar() {
