@@ -197,21 +197,75 @@ fn erase_ball(x: i32, y: i32) {
     fill_rect(x, y, BALL_SIZE, BALL_SIZE, BG_COLOR);
 }
 
-fn draw_message(msg_len: usize) {
-    let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
-    let cy = (PLAY_TOP + PLAY_BOTTOM) / 2;
-    let total_w = msg_len as i32 * 8;
-    let sx = cx - total_w / 2;
-    fill_rect(sx - 4, cy - 4, total_w + 8, 16, BG_COLOR);
-    for i in 0..msg_len {
-        fill_rect(sx + i as i32 * 8, cy, 6, 8, MSG_COLOR);
+/// Draw a large 7-segment digit (scaled by `scale` from base 20x30).
+fn draw_big_digit(x: i32, y: i32, digit: u32, color: [u8; 4], scale: i32) {
+    if digit > 9 {
+        return;
     }
+    let segs = DIGIT_SEGS[digit as usize];
+    let w = DIGIT_W * scale;
+    let h = DIGIT_H * scale;
+    let half = h / 2;
+    let t = SEG_T * scale;
+    if segs & (1 << 0) != 0 { fill_rect(x, y, w, t, color); }
+    if segs & (1 << 1) != 0 { fill_rect(x + w - t, y, t, half, color); }
+    if segs & (1 << 2) != 0 { fill_rect(x + w - t, y + half, t, half, color); }
+    if segs & (1 << 3) != 0 { fill_rect(x, y + h - t, w, t, color); }
+    if segs & (1 << 4) != 0 { fill_rect(x, y + half, t, half, color); }
+    if segs & (1 << 5) != 0 { fill_rect(x, y, t, half, color); }
+    if segs & (1 << 6) != 0 { fill_rect(x, y + half - t / 2, w, t, color); }
 }
 
-fn erase_message_area() {
+const BANNER_W: i32 = 300;
+const BANNER_H: i32 = 200;
+
+/// Draw game over screen: dark overlay with large "P1" or "P2" in winner's color.
+fn draw_game_over(winner: u32) {
     let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
     let cy = (PLAY_TOP + PLAY_BOTTOM) / 2;
-    fill_rect(cx - 120, cy - 4, 240, 16, BG_COLOR);
+    let bx = cx - BANNER_W / 2;
+    let by = cy - BANNER_H / 2;
+
+    // Dark overlay banner
+    let overlay: [u8; 4] = [0x10, 0x08, 0x08, 0xFF];
+    fill_rect(bx, by, BANNER_W, BANNER_H, overlay);
+
+    // Border in winner's color
+    let color = if winner == 1 { SCORE_COLOR_P1 } else { SCORE_COLOR_P2 };
+    fill_rect(bx, by, BANNER_W, 3, color);
+    fill_rect(bx, by + BANNER_H - 3, BANNER_W, 3, color);
+    fill_rect(bx, by, 3, BANNER_H, color);
+    fill_rect(bx + BANNER_W - 3, by, 3, BANNER_H, color);
+
+    // "P" rendered as segments: top + top-left + top-right + middle + bottom-left
+    // (custom shape, not from DIGIT_SEGS)
+    let scale = 3;
+    let pw = DIGIT_W * scale; // 60
+    let ph = DIGIT_H * scale; // 90
+    let pt = SEG_T * scale;   // 12
+    let phalf = ph / 2;
+    let px = cx - pw - 10;
+    let py = cy - phalf;
+    // top bar
+    fill_rect(px, py, pw, pt, color);
+    // top-left
+    fill_rect(px, py, pt, phalf, color);
+    // top-right
+    fill_rect(px + pw - pt, py, pt, phalf, color);
+    // middle bar
+    fill_rect(px, py + phalf - pt / 2, pw, pt, color);
+    // bottom-left
+    fill_rect(px, py + phalf, pt, phalf, color);
+
+    // Winner digit (1 or 2)
+    draw_big_digit(cx + 10, cy - phalf, winner, color, scale);
+}
+
+/// Erase the game over banner area.
+fn erase_game_over() {
+    let cx = (PLAY_LEFT + PLAY_RIGHT) / 2;
+    let cy = (PLAY_TOP + PLAY_BOTTOM) / 2;
+    fill_rect(cx - BANNER_W / 2, cy - BANNER_H / 2, BANNER_W, BANNER_H, BG_COLOR);
 }
 
 // ─── PRNG ───
@@ -471,6 +525,7 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
     fb_flush();
 
     let mut keys = KeyState::new();
+    let mut game_over_drawn = false;
     let mut prev_ball_x = state.ball_x / FP_ONE;
     let mut prev_ball_y = state.ball_y / FP_ONE;
     let mut prev_paddle1_y = state.paddle1_y;
@@ -514,7 +569,19 @@ fn parent_loop(state: &mut SharedState, rng: &mut Rng) {
                 }
             }
             STATE_GAME_OVER => {
+                if !game_over_drawn {
+                    let winner = if state.score1 >= WIN_SCORE { 1 } else { 2 };
+                    draw_game_over(winner);
+                    fb_flush();
+                    crate::println!(
+                        "[pingpong] Player {} wins! ({}-{}) Press any key to restart.",
+                        winner, state.score1, state.score2
+                    );
+                    game_over_drawn = true;
+                }
                 if keys.any_pressed {
+                    game_over_drawn = false;
+                    erase_game_over();
                     init_game(state, rng);
                     draw_background();
                     draw_score(0, 0);
