@@ -1806,16 +1806,71 @@ pub fn run_game() {
                 }
             }
             GameState::GameOver => {
-                // Draw GAME OVER overlay (once)
                 if game.state_timer == 0 {
-                    let ow = 12 * CHAR_PX_W;
-                    let ox = MAZE_PX_X + (MAZE_W * CELL_SIZE - ow) / 2;
-                    let oy = MAZE_PX_Y + 9 * CELL_SIZE;
+                    // ── Game Over overlay ──
+                    // Centered panel over the maze
+                    let maze_cx = MAZE_PX_X + MAZE_W * CELL_SIZE / 2;
+                    let panel_w: usize = 280;
+                    let panel_h: usize = 200;
+                    let panel_x = maze_cx - panel_w / 2;
+                    let panel_y = MAZE_PX_Y + MAZE_H * CELL_SIZE / 2 - panel_h / 2;
 
-                    fill_rect(ox - 8, oy - 8, ow + 16, 80, BG_VOID);
-                    draw_string(ox, oy, b"GAME OVER", GAMEOVER_COLOR);
-                    draw_string(ox, oy + 30, b"SPC RESTART", TEXT_DIM);
+                    // Dark panel background with blue border
+                    fill_rect(panel_x - 4, panel_y - 4, panel_w + 8, panel_h + 8, WALL_EDGE);
+                    fill_rect(panel_x - 2, panel_y - 2, panel_w + 4, panel_h + 4, WALL_SHADOW);
+                    fill_rect(panel_x, panel_y, panel_w, panel_h, BG_VOID);
+
+                    // "GAME OVER" title in red, centered
+                    let title = b"GAME OVER";
+                    let title_w = title.len() * CHAR_PX_W;
+                    draw_string(panel_x + (panel_w - title_w) / 2, panel_y + 16, title, GAMEOVER_COLOR);
+
+                    // Horizontal divider line
+                    fill_rect(panel_x + 20, panel_y + 40, panel_w - 40, 2, WALL_EDGE);
+
+                    // "SCORE" label and value
+                    draw_string(panel_x + 20, panel_y + 54, b"SCORE", TEXT_LABEL);
+                    draw_number(panel_x + 20, panel_y + 72, game.score, TEXT_COLOR);
+
+                    // "HIGH" label and value
+                    draw_string(panel_x + 150, panel_y + 54, b"HIGH", TEXT_LABEL);
+                    draw_number(panel_x + 150, panel_y + 72, game.high_score, TEXT_GREEN);
+
+                    // New high score indicator
+                    if game.score >= game.high_score && game.score > 0 {
+                        let msg = b"NEW HIGH SCORE!";
+                        let msg_w = msg.len() * CHAR_PX_W;
+                        draw_string(panel_x + (panel_w - msg_w) / 2, panel_y + 100, msg, PAC_BODY);
+                    }
+
+                    // "LEVEL" and level number
+                    draw_string(panel_x + 20, panel_y + 128, b"LEVEL", TEXT_LABEL);
+                    draw_number(panel_x + 90, panel_y + 128, game.level, TEXT_COLOR);
+
+                    // Second divider
+                    fill_rect(panel_x + 20, panel_y + 152, panel_w - 40, 2, WALL_EDGE);
+
+                    // Restart prompt (blinks)
+                    let prompt = b"PRESS SPACE";
+                    let prompt_w = prompt.len() * CHAR_PX_W;
+                    draw_string(panel_x + (panel_w - prompt_w) / 2, panel_y + 168, prompt, TEXT_DIM);
                 }
+
+                // Blink the "PRESS SPACE" prompt every 8 ticks
+                if game.state_timer > 0 && game.state_timer % 8 == 0 {
+                    let maze_cx = MAZE_PX_X + MAZE_W * CELL_SIZE / 2;
+                    let panel_w: usize = 280;
+                    let panel_y = MAZE_PX_Y + MAZE_H * CELL_SIZE / 2 - 100;
+                    let panel_x = maze_cx - panel_w / 2;
+                    let prompt = b"PRESS SPACE";
+                    let prompt_w = prompt.len() * CHAR_PX_W;
+                    let blink_on = (game.state_timer / 8) % 2 == 0;
+                    let prompt_color = if blink_on { PELLET_COLOR } else { TEXT_DIM };
+                    // Erase and redraw prompt area
+                    fill_rect(panel_x + 10, panel_y + 166, panel_w - 20, 16, BG_VOID);
+                    draw_string(panel_x + (panel_w - prompt_w) / 2, panel_y + 168, prompt, prompt_color);
+                }
+
                 game.state_timer += 1;
             }
             GameState::Paused => {
