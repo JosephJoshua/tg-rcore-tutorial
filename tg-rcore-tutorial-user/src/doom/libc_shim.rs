@@ -4,7 +4,7 @@
 //! classification, qsort, and misc stubs. Printf family is implemented in C
 //! (doom_libc.c) to avoid va_list FFI issues.
 
-use core::ffi::{c_char, c_int, c_long, c_uint, c_void};
+use core::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 
 // ============================================================
 // Memory allocator — bump allocator over sbrk()
@@ -449,6 +449,66 @@ pub extern "C" fn strtol(
         }
         if neg { -val } else { val }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn atol(nptr: *const c_char) -> c_long {
+    strtol(nptr, core::ptr::null_mut(), 10)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn strtoul(
+    nptr: *const c_char,
+    endptr: *mut *mut c_char,
+    base: c_int,
+) -> c_ulong {
+    // Reuse strtol logic — Doom doesn't use values near overflow boundaries
+    strtol(nptr, endptr, base) as c_ulong
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn strtod(nptr: *const c_char, endptr: *mut *mut c_char) -> f64 {
+    unsafe {
+        let mut i = 0;
+        while isspace(*nptr.add(i) as c_int) != 0 {
+            i += 1;
+        }
+        let mut neg = false;
+        if *nptr.add(i) == b'-' as c_char {
+            neg = true;
+            i += 1;
+        } else if *nptr.add(i) == b'+' as c_char {
+            i += 1;
+        }
+
+        // Integer part
+        let mut val: f64 = 0.0;
+        while isdigit(*nptr.add(i) as c_int) != 0 {
+            val = val * 10.0 + (*nptr.add(i) as u8 - b'0') as f64;
+            i += 1;
+        }
+
+        // Fractional part
+        if *nptr.add(i) == b'.' as c_char {
+            i += 1;
+            let mut frac: f64 = 0.1;
+            while isdigit(*nptr.add(i) as c_int) != 0 {
+                val += (*nptr.add(i) as u8 - b'0') as f64 * frac;
+                frac *= 0.1;
+                i += 1;
+            }
+        }
+
+        if !endptr.is_null() {
+            *endptr = nptr.add(i) as *mut c_char;
+        }
+        if neg { -val } else { val }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn atof(nptr: *const c_char) -> f64 {
+    strtod(nptr, core::ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]

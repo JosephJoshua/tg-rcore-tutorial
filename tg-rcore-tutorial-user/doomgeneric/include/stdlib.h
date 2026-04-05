@@ -18,6 +18,7 @@ int atexit(void (*func)(void));
 
 int atoi(const char *nptr);
 long atol(const char *nptr);
+double atof(const char *nptr);
 long strtol(const char *nptr, char **endptr, int base);
 unsigned long strtoul(const char *nptr, char **endptr, int base);
 double strtod(const char *nptr, char **endptr);
