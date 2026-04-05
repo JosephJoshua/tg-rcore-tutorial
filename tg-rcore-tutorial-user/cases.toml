@@ -453,3 +453,9 @@ cases = [
     "initproc",
     "pacman",
 ]
+
+[ch8_doom]
+cases = [
+    "initproc",
+    "doom",
+]

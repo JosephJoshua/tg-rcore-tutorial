@@ -34,5 +34,9 @@ tetris = []
 pingpong = []
 breakout = []
 pacman = []
+doom = []
+
+[build-dependencies]
+cc = "1"
 
 [workspace]

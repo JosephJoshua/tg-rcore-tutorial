@@ -22,6 +22,7 @@ extern "C" fn main() -> i32 {
             "-8" => "ch8b_usertest",
             "breakout" => "breakout",
             "pacman" => "pacman",
+            "doom" => "doom",
             _ => "user_shell",
         };
         exec(target);
