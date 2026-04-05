@@ -130,18 +130,15 @@ fn poll_keyboard() {
     let mut buf = [0u8; 1];
     loop {
         let n = read(STDIN, &mut buf);
-        if n <= 0 || buf[0] == 0 {
+        // read() takes &[u8] (immutable) and the ecall asm has no memory clobber,
+        // so the optimizer may assume buf[0] is still 0. Use read_volatile to
+        // force a reload from memory after the kernel writes to it.
+        let raw = unsafe { core::ptr::read_volatile(buf.as_ptr()) };
+        if n <= 0 || raw == 0 {
             break;
         }
-        let raw = buf[0];
         let pressed = (raw & 0x80) == 0;
         let scancode = raw & 0x7F;
-
-        // Debug: log raw keyboard input
-        tg_syscall::write(tg_syscall::STDOUT, b"[K]");
-        tg_syscall::write(tg_syscall::STDOUT, &[b'0' + scancode / 100, b'0' + (scancode/10)%10, b'0' + scancode%10]);
-        if pressed { tg_syscall::write(tg_syscall::STDOUT, b"v\n"); }
-        else { tg_syscall::write(tg_syscall::STDOUT, b"^\n"); }
 
         let doom_key = keymap::translate(scancode);
         if doom_key != 0 {
