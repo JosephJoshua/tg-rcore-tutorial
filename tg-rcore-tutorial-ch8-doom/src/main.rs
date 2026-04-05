@@ -421,6 +421,8 @@ fn keyboard_trygetchar() -> Option<u8> {
         let p = &raw mut KEYBOARD;
         (*p).as_mut()
     }?;
+    // Acknowledge any pending VirtIO interrupt — QEMU may stall events otherwise
+    kbd.ack_interrupt();
     loop {
         match kbd.pop_pending_event() {
             Some(event) => {
