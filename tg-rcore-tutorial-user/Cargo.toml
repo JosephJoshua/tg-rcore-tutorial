@@ -1,7 +1,7 @@
 [package]
 name = "jsph-tg-rcore-tutorial-user"
 description = "User-space apps for rCore Tutorial chapters"
-version = "0.4.13"
+version = "0.4.14"
 edition = "2024"
 authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
 repository = "https://github.com/JosephJoshua/tg-rcore-tutorial"
