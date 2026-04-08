@@ -1,0 +1,14 @@
+[package]
+name = "jsph-tg-rcore-tutorial-kernel-alloc-smp"
+description = "SMP-safe kernel memory allocator for rCore tutorial OS using buddy allocation with spinlock."
+version = "0.4.8"
+edition = "2024"
+authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
+license = "GPL-3.0"
+readme = "README.md"
+keywords = ["rcore", "kernel", "allocator", "riscv", "smp"]
+categories = ["no-std", "embedded", "memory-management"]
+
+[dependencies]
+customizable-buddy = "0.0.3"
+page-table = "0.0.6"
