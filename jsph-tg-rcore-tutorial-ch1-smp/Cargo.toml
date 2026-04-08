@@ -1,0 +1,25 @@
+[package]
+name = "jsph-tg-rcore-tutorial-ch1-smp"
+description = "Chapter 1 SMP: Multi-core bare-metal demo with synchronization primitives."
+version = "0.4.8"
+edition = "2024"
+authors = ["Joseph Joshua Anggita <jj.anggita@gmail.com>"]
+repository = "https://github.com/rcore-os/tg-rcore-tutorial-ch1"
+homepage = "https://github.com/rcore-os/tg-rcore-tutorial-ch1/tree/test"
+documentation = "https://docs.rs/tg-rcore-tutorial-ch1"
+license = "GPL-3.0"
+readme = "README.md"
+keywords = ["rcore", "tutorial", "no-std", "riscv", "bare-metal"]
+categories = ["no-std", "embedded"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+tg-sbi = { package = "jsph-tg-rcore-tutorial-sbi-smp", path = "../jsph-tg-rcore-tutorial-sbi-smp", version = "0.4.8", features = ["nobios"] }
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+virtio-drivers = "0.1.0"

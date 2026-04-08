@@ -1,0 +1,33 @@
+# sysdeps.txt - 定义需要用本地路径覆盖的依赖包映射
+# 格式: "包名" "相对路径"
+#
+# 路径均相对于 systest/<crate>/Cargo.toml 所在目录：
+#   tg-rcore-tutorial/tg-rcore-tutorial-sbi/systest/<crate>/
+#
+#   ../../        → tg-rcore-tutorial-sbi/   (sbi 本身)
+#   ../../../X    → tg-rcore-tutorial/X      (sbi 的兄弟组件)
+#
+# systest.sh 仅当路径实际存在时才将其写入被测 crate 的 Cargo.toml。
+# ch1~ch8 是测试目标，不应在此定义（路径由脚本自动推导）。
+
+# Layer 0: 基础组件 (无内部依赖)
+"tg-rcore-tutorial-sbi"              "../../"
+"tg-rcore-tutorial-linker"           "../../../tg-rcore-tutorial-linker"
+"tg-rcore-tutorial-console"          "../../../tg-rcore-tutorial-console"
+"tg-rcore-tutorial-kernel-context"   "../../../tg-rcore-tutorial-kernel-context"
+"tg-rcore-tutorial-kernel-alloc"     "../../../tg-rcore-tutorial-kernel-alloc"
+"tg-rcore-tutorial-kernel-vm"        "../../../tg-rcore-tutorial-kernel-vm"
+"tg-rcore-tutorial-easy-fs"          "../../../tg-rcore-tutorial-easy-fs"
+"tg-rcore-tutorial-signal-defs"      "../../../tg-rcore-tutorial-signal-defs"
+"tg-rcore-tutorial-sync"             "../../../tg-rcore-tutorial-sync"
+"tg-rcore-tutorial-checker"          "../../../tg-rcore-tutorial-checker"
+"tg-rcore-tutorial-task-manage"      "../../../tg-rcore-tutorial-task-manage"
+
+# Layer 1: 中间组件
+"tg-rcore-tutorial-syscall"          "../../../tg-rcore-tutorial-syscall"
+"tg-rcore-tutorial-signal"           "../../../tg-rcore-tutorial-signal"
+
+# Layer 2: 上层组件
+"tg-rcore-tutorial-signal-impl"      "../../../tg-rcore-tutorial-signal-impl"
+"tg-rcore-tutorial-user"             "../../../tg-rcore-tutorial-user"
+

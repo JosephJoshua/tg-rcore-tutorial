@@ -1,0 +1,15 @@
+# 默认编译目标：RISC-V 64 位裸机平台
+[build]
+target = "riscv64gc-unknown-none-elf"
+
+# QEMU 运行器配置（含 VirtIO-GPU 图形输出）
+[target.riscv64gc-unknown-none-elf]
+runner = [
+    "qemu-system-riscv64",
+    "-machine", "virt",
+    "-smp", "4",
+    "-serial", "stdio",
+    "-bios", "none",
+    "-device", "virtio-gpu-device",
+    "-kernel",
+]
